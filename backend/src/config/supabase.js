@@ -1,5 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Polyfill minimal WebSocket stub if running in Node < 22 environments where native WebSocket is missing
+if (typeof globalThis.WebSocket === 'undefined') {
+  globalThis.WebSocket = class DummyWebSocket {
+    constructor() {}
+    close() {}
+    send() {}
+    addEventListener() {}
+    removeEventListener() {}
+  };
+}
+
 export function createSupabaseClients(config) {
   const clientOptions = {
     auth: {
