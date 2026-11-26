@@ -1,0 +1,30 @@
+{
+  "appId": "in.class10lms.ssc",
+  "appName": "Class 10 SSC LMS",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "app.class10lms.in",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false,
+    "backgroundColor": "#0F172A"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "launchAutoHide": true,
+      "backgroundColor": "#1E3A8A",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#1E3A8A"
+    }
+  }
+}

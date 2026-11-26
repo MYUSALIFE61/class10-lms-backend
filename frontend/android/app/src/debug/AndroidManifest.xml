@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug Build Overlay ONLY: Permits cleartext loopback for local development preview over ADB reverse.
+     Release builds strictly use src/main/AndroidManifest.xml where usesCleartextTraffic is false. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+</manifest>

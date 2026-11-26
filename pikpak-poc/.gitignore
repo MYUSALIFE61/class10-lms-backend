@@ -1,0 +1,9 @@
+# Strictly ignore any local test URLs, session artifacts, or build outputs
+.env
+*.local.json
+*.url
+node_modules/
+android-poc/build/
+android-poc/app/build/
+android-poc/.gradle/
+android-poc/local.properties

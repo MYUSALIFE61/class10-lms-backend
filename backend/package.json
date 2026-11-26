@@ -1,0 +1,35 @@
+{
+  "name": "class10-lms-backend",
+  "version": "1.0.0",
+  "description": "Secure Express backend API for AP & Telangana Class 10 LMS Android APK",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "dev:preview": "node scripts/dev-preview-server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:syntax": "node --check src/server.js && node --check src/app.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "compression": "^1.8.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "google-auth-library": "^9.15.1",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "razorpay": "^2.9.6",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0",
+    "vitest": "^3.0.7"
+  }
+}

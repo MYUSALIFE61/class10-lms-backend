@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="320" height="200">
+  <defs>
+    <linearGradient id="boardBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e463a" />
+      <stop offset="55%" stop-color="#225344" />
+      <stop offset="100%" stop-color="#17382e" />
+    </linearGradient>
+    <radialGradient id="chalkGlow" cx="65%" cy="42%" r="55%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="kurti" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1d4ed8" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+  </defs>
+
+  <!-- Classroom green chalkboard -->
+  <rect width="320" height="200" fill="url(#boardBg)" />
+  <rect width="320" height="200" fill="url(#chalkGlow)" />
+  <rect x="4" y="4" width="312" height="192" rx="10" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2" />
+
+  <!-- Subtle chalk lesson writing on right -->
+  <text x="128" y="54" fill="#eef8f3" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700" opacity="0.94">Real Numbers</text>
+  <text x="150" y="80" fill="#d1fae5" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-style="italic" opacity="0.88">(Introduction)</text>
+  <line x1="130" y1="90" x2="292" y2="90" stroke="#a7f3d0" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.45" />
+  <text x="148" y="132" fill="#f0fdf4" font-family="Georgia, serif" font-size="21" font-weight="600" opacity="0.92">√2, √3, π ...</text>
+  <text x="156" y="160" fill="#bbf7d0" font-family="Georgia, serif" font-size="14" opacity="0.72">a = bq + r</text>
+
+  <!-- Stylized teacher silhouette/illustration on left -->
+  <g transform="translate(8, 22)">
+    <!-- Hair -->
+    <ellipse cx="56" cy="54" rx="28" ry="30" fill="#1e1b2e" />
+    <!-- Neck & shoulders -->
+    <rect x="48" y="76" width="16" height="18" rx="6" fill="#d9956c" />
+    <!-- Blue kurti / outfit -->
+    <path d="M16 178 C18 118, 30 92, 56 92 C82 92, 94 118, 96 178 Z" fill="url(#kurti)" />
+    <!-- Pattern dots on kurti -->
+    <circle cx="42" cy="124" r="2" fill="#93c5fd" opacity="0.7" />
+    <circle cx="66" cy="130" r="2" fill="#93c5fd" opacity="0.7" />
+    <circle cx="52" cy="148" r="2" fill="#93c5fd" opacity="0.7" />
+    <circle cx="72" cy="156" r="2" fill="#93c5fd" opacity="0.7" />
+    <circle cx="38" cy="158" r="2" fill="#93c5fd" opacity="0.7" />
+    <!-- Pointing arm -->
+    <path d="M84 128 Q106 140 128 126" stroke="#d9956c" stroke-width="11" stroke-linecap="round" fill="none" />
+    <!-- Face -->
+    <ellipse cx="56" cy="56" rx="20" ry="23" fill="#e6a882" />
+    <!-- Hair parting -->
+    <path d="M36 52 C38 30, 74 30, 76 52 C68 38, 44 38, 36 52 Z" fill="#1e1b2e" />
+    <!-- Eyes & smile -->
+    <circle cx="49" cy="54" r="2.2" fill="#1f2937" />
+    <circle cx="63" cy="54" r="2.2" fill="#1f2937" />
+    <circle cx="56" cy="48" r="1.4" fill="#dc2626" />
+    <path d="M49 65 Q56 71 63 65" stroke="#7c2d12" stroke-width="2" stroke-linecap="round" fill="none" />
+  </g>
+</svg>
