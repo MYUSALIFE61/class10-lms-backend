@@ -19,9 +19,9 @@ The Class 10 LMS Node.js/Express backend has been prepared, committed to GitHub,
 | Deployment Phase | Scope / Objective | Method | Status | Findings / Evidence |
 | :--- | :--- | :--- | :---: | :--- |
 | **Phase 1: Repository Verification** | Codebase, scripts & tests | Git & `npm test` | **PASS** | Repository initialized & pushed to GitHub. `npm start` binds to `process.env.PORT`. All 8 test suites (26 tests) passed with 100% success. |
-| **Phase 2: Environment Audit** | Production variable contract | `backend/src/config/env.js` | **PARTIAL** | 9 non-sensitive variables configured via Render API. Sensitive production secrets (Supabase, Razorpay, JWT keys) pending input. |
-| **Phase 3: Render Deployment** | Web Service creation & build | Render REST API | **PASS (Build)** / **PENDING (Live)** | Service `srv-dc41v1vf3r2c73a29agg` created in Singapore. Build succeeded (`bld-dc4208cs6fmc73didm90`). Server start paused awaiting database credentials. |
-| **Phase 4: Backend Validation** | API health, CORS & routing | Architecture audit | **PENDING** | Pre-configured: `/api/v1/health` and CORS allowing `https://localhost` and `https://app.class10lms.in`. Live verification resumes upon secret injection. |
+| **Phase 2: Environment Audit** | Production variable contract | `backend/src/config/env.js` | **PASS** | All 18 production variables configured via Render API (Supabase, Razorpay Live, JWT keys, device limits). |
+| **Phase 3: Render Deployment** | Web Service creation & build | Render REST API | **PASS (LIVE)** | Service `srv-dc41v1vf3r2c73a29agg` running in Singapore. Deploy `dep-dc446v0ae00c73d656d0` is **LIVE**. |
+| **Phase 4: Backend Validation** | API health, CORS & routing | Live HTTPS curl | **PASS** | `/health` & `/api/v1/health` return HTTP 200 `{"success":true,"status":"ok"}`. Auth endpoint responds correctly. |
 | **Phase 5: Custom Domain Setup** | `api.class10lms.in` registration | Render Custom Domain API | **PASS** | Registered `cdm-dc4216p5efls73cr9l30` on Render. Exact CNAME instructions generated. |
 | **Phase 6: Storage Persistence** | Video file retention audit | Filesystem review | **CAUTION** | Render free/default container filesystem is **ephemeral**. Local disk resets on redeploy. Requires Supabase Storage bucket or Render Persistent Disk. |
 
