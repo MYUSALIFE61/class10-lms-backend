@@ -1,0 +1,8 @@
+{
+  "name": "class10-lms-root",
+  "private": true,
+  "scripts": {
+    "build": "cd backend && npm install",
+    "start": "cd backend && npm start"
+  }
+}
