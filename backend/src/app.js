@@ -62,6 +62,15 @@ export function createApp({
 
   applySecurityMiddleware(app, config);
 
+  app.get('/health', (_req, res) => {
+    res.status(200).json({
+      success: true,
+      status: 'ok',
+      service: 'class10-lms-backend',
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Preserve rawBody for Razorpay webhook HMAC verification; allow up to 20mb for protected PDF/image uploads
   app.use(
     express.json({

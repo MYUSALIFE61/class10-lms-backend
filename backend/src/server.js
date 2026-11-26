@@ -7,6 +7,15 @@ import { RazorpayGateway } from './services/paymentService.js';
 import { GooglePlayIntegrityProvider } from './services/integrityService.js';
 import { createApp } from './app.js';
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[class10-lms-backend] Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[class10-lms-backend] Uncaught Exception:', err);
+  process.exit(1);
+});
+
 const config = loadEnv();
 const { supabaseAdmin, supabaseAuth } = createSupabaseClients(config);
 const store = new SupabaseDataStore(supabaseAdmin);
@@ -22,10 +31,16 @@ const { app } = createApp({
   integrityProvider,
 });
 
-const server = app.listen(config.PORT, () => {
+const HOST = process.env.HOST || '0.0.0.0';
+const server = app.listen(config.PORT, HOST, () => {
   console.log(
-    `[class10-lms-backend] Running on port ${config.PORT} (${config.NODE_ENV})`
+    `[class10-lms-backend] Running on ${HOST}:${config.PORT} (${config.NODE_ENV})`
   );
+});
+
+server.on('error', (err) => {
+  console.error('[class10-lms-backend] Fatal server error:', err);
+  process.exit(1);
 });
 
 function shutdown(signal) {
@@ -35,3 +50,4 @@ function shutdown(signal) {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
