@@ -315,6 +315,26 @@ export async function startNativeOfflineDownload(params) {
   return Class10OfflineDownload.startDownload(params);
 }
 
+export async function pauseNativeOfflineDownload({ studentId, lessonId }) {
+  if (!isNativeAndroid()) return { paused: false };
+  return Class10OfflineDownload.pauseDownload({ studentId, lessonId });
+}
+
+export async function updateNativeOfflineLease({
+  studentId,
+  leaseToken,
+  leaseExpiresAtEpochMs,
+  subscriptionExpiresAtEpochMs = 0,
+}) {
+  if (!isNativeAndroid()) return { updated: false };
+  return Class10OfflineDownload.updateOfflineLease({
+    studentId,
+    leaseToken,
+    leaseExpiresAtEpochMs,
+    subscriptionExpiresAtEpochMs,
+  });
+}
+
 export async function cancelNativeOfflineDownload({ studentId, lessonId }) {
   if (!isNativeAndroid()) return { cancelled: false };
   return Class10OfflineDownload.cancelDownload({ studentId, lessonId });

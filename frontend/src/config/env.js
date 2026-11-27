@@ -4,10 +4,12 @@ function isLoopback(url) {
   return /^(https?:\/\/)?(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?/i.test(url);
 }
 
+const IS_STRICT_PROD = Boolean(import.meta.env.PROD) && import.meta.env.MODE !== 'development';
+
 function resolveDefaultApiBaseUrl() {
   if (import.meta.env.VITE_API_BASE_URL) {
     const custom = import.meta.env.VITE_API_BASE_URL.trim();
-    if (import.meta.env.PROD && isLoopback(custom)) {
+    if (IS_STRICT_PROD && isLoopback(custom)) {
       throw new Error(
         `[SECURITY ERROR] Production builds must NEVER use loopback/localhost API endpoints (got: ${custom}). Set a verified HTTPS production URL in VITE_API_BASE_URL.`
       );
@@ -15,9 +17,9 @@ function resolveDefaultApiBaseUrl() {
     return custom;
   }
 
-  // In Vite dev server or test runner, proxy via /api/v1 or local dev backend.
-  // Production builds NEVER fall back to localhost.
-  if (import.meta.env.DEV || import.meta.env.MODE === 'test') {
+  // In Vite dev server, development builds, or test runner, proxy via /api/v1 or local dev backend.
+  // Strict production builds NEVER fall back to localhost.
+  if (import.meta.env.DEV || import.meta.env.MODE === 'development' || import.meta.env.MODE === 'test') {
     if (
       typeof window !== 'undefined' &&
       window.location?.protocol === 'http:' &&
@@ -38,8 +40,8 @@ export const APP_CONFIG = {
   appName: import.meta.env.VITE_APP_NAME || 'Class 10 SSC LMS',
   appVersion: import.meta.env.VITE_APP_VERSION || '1.0.0',
   supportEmail: import.meta.env.VITE_SUPPORT_EMAIL || 'support@class10lms.in',
-  isProduction: Boolean(import.meta.env.PROD),
-  isDevelopment: Boolean(import.meta.env.DEV),
+  isProduction: IS_STRICT_PROD,
+  isDevelopment: Boolean(import.meta.env.DEV) || import.meta.env.MODE === 'development',
 };
 
 export function validateRuntimeConfig() {

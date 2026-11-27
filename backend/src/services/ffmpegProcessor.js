@@ -136,7 +136,7 @@ export class FfmpegProcessor {
   startCleanupSchedule(intervalMs = 10 * 60 * 1000) {
     if (this._cleanupTimer) return;
     this._cleanupTimer = setInterval(() => {
-      this.sweepStaleTempJobs().catch(() => {});
+      this.sweepStaleTempJobs().catch(() => { });
     }, intervalMs);
     if (typeof this._cleanupTimer.unref === 'function') {
       this._cleanupTimer.unref();

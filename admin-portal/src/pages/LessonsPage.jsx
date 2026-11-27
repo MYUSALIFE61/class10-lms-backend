@@ -202,15 +202,15 @@ export function LessonsPage() {
           <div className="p-3 rounded-xl bg-[#F5F8FF] border border-blue-100 space-y-2">
             <div className="text-[11px] font-bold text-[#155EEF]">Attach Video (Language: TE_EN_MIX)</div>
             <select className="field-input" value={form.videoProvider} onChange={(e) => setForm({ ...form, videoProvider: e.target.value })}>
-              <option value="pikpak_local">Existing PikPak Asset</option>
-              <option value="cloudflare_r2">Cloudflare R2 Object</option>
+              <option value="private_asset_stream">Private Server Disk Asset (Offline + Stream)</option>
+              <option value="pikpak_local">Existing Local PikPak Asset</option>
               <option value="youtube_unlisted">YouTube Unlisted ID</option>
             </select>
             {form.videoProvider === 'youtube_unlisted' ? (
               <input className="field-input" placeholder="11-char YouTube Video ID" value={form.youtubeVideoId} onChange={(e) => setForm({ ...form, youtubeVideoId: e.target.value })} />
             ) : (
               <select className="field-input" value={form.providerFileId} onChange={(e) => setForm({ ...form, providerFileId: e.target.value })}>
-                <option value="">Select synced PikPak / R2 asset...</option>
+                <option value="">Select synced server video asset...</option>
                 {videos.filter((v) => v.providerFileId).map((v) => (
                   <option key={v.lessonId} value={v.providerFileId}>
                     {v.originalFileName || v.displayTitle} ({v.provider})

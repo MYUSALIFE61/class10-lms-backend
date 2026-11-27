@@ -87,6 +87,41 @@ class LmsNavigationPolicyTest {
     }
 
     @Test
+    fun allowsUpiAndBank3dsOnlyDuringActiveCheckoutAndPreservesSecurityOutsideCheckout() {
+        val checkoutUrl = "https://app.class10lms.in/checkout/CLASS10_ANNUAL_799"
+        val lessonUrl = "https://app.class10lms.in/lessons/lesson-1"
+        assertTrue(LmsNavigationPolicy.isCheckoutContext(checkoutUrl, lmsHost))
+        assertFalse(LmsNavigationPolicy.isCheckoutContext(lessonUrl, lmsHost))
+
+        val upiLinks = listOf(
+            "upi://pay?pa=merchant@razorpay&pn=Class10LMS&am=799.00&cu=INR",
+            "tez://upi/pay?pa=merchant@razorpay&am=799",
+            "phonepe://pay?pa=merchant@razorpay&am=799",
+            "paytmmp://pay?pa=merchant@razorpay&am=799",
+            "intent://pay?pa=merchant@razorpay#Intent;scheme=upi;package=com.phonepe.app;end"
+        )
+        for (url in upiLinks) {
+            val outside = LmsNavigationPolicy.evaluateNavigation(url, isForMainFrame = true, lmsHost = lmsHost, inPaymentCheckout = false)
+            assertFalse("UPI link must remain blocked outside checkout: $url", outside.allow)
+
+            val inside = LmsNavigationPolicy.evaluateNavigation(url, isForMainFrame = true, lmsHost = lmsHost, inPaymentCheckout = true)
+            assertTrue("UPI link must be allowed inside checkout: $url (${inside.reason})", inside.allow)
+            assertTrue(inside.isExternalPaymentApp)
+        }
+
+        // Bank 3DS ACS iframe allowed during checkout, blocked on top-level main LMS frame
+        val acsUrl = "https://acs.hdfcbank.com/3ds/challenge"
+        assertTrue(LmsNavigationPolicy.evaluateNavigation(acsUrl, isForMainFrame = false, lmsHost = lmsHost, inPaymentCheckout = true).allow)
+        assertFalse(LmsNavigationPolicy.evaluateNavigation(acsUrl, isForMainFrame = true, lmsHost = lmsHost, inPaymentCheckout = true).allow)
+
+        // YouTube intent MUST remain blocked even when inPaymentCheckout = true
+        val ytIntent = "intent://www.youtube.com/watch?v=M7lc1UVf-VE#Intent;package=com.google.android.youtube;scheme=https;end"
+        assertFalse(LmsNavigationPolicy.evaluateNavigation(ytIntent, isForMainFrame = true, lmsHost = lmsHost, inPaymentCheckout = true).allow)
+        assertFalse(LmsNavigationPolicy.evaluatePaymentPopupNavigation("https://www.youtube.com/watch?v=M7lc1UVf-VE").allow)
+        assertTrue(LmsNavigationPolicy.evaluatePaymentPopupNavigation("https://acs.sbi.co.in/otp").allow)
+    }
+
+    @Test
     fun blocksExternalBrowsersAndSpoofedDomainHostnames() {
         val blockedExternal = listOf(
             "https://www.google.com/",

@@ -18,6 +18,7 @@ build/
 coverage/
 backend/storage/
 backend/tmp/
+backend/uploads/
 .gradle-home/
 .gradle-home-build/
 .gradle-project-cache/

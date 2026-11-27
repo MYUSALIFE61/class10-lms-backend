@@ -69,7 +69,7 @@ function isAllowedOwnStreamUrl(rawUrl) {
 /**
  * LMSVideoPlayer
  * Supports:
- * 1) Own Branded Player (provider="pikpak_local" | "cloudflare_r2" | "private_stream"):
+ * 1) Own Branded Player (provider="pikpak_local" | "private_asset_stream" | "private_stream"):
  *    - On Android APK: launches native Android Media3 ExoPlayer (FLAG_SECURE + watermark + controls)
  *    - On Web Browser: renders custom LMS HTML5 <video> player with ZERO YouTube logo or redirect
  * 2) Legacy fallback (provider="youtube_unlisted"): Official YouTube IFrame Player API
@@ -105,7 +105,7 @@ export function LMSVideoPlayer({
   const isPrivateStream =
     provider === 'private_stream' ||
     provider === 'pikpak_local' ||
-    provider === 'cloudflare_r2';
+    provider === 'private_asset_stream';
   const nativeAndroid = isNativeAndroid();
 
   const [playerState, setPlayerState] = useState('loading'); // loading | ready | playing | paused | buffering | ended | error

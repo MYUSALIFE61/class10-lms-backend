@@ -35,7 +35,8 @@ data class OfflineVideoRecord(
     val qualityLabel: String,
     val errorCode: String = "",
     val errorMessage: String = "",
-    val cipherFormat: String = OfflineVideoVault.CIPHER_FORMAT_V2_GCM
+    val cipherFormat: String = OfflineVideoVault.CIPHER_FORMAT_V2_GCM,
+    val offlineLeaseExpiresAtEpochMs: Long = 0L
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("lessonId", lessonId)
@@ -61,6 +62,7 @@ data class OfflineVideoRecord(
         put("errorCode", errorCode)
         put("errorMessage", errorMessage)
         put("cipherFormat", cipherFormat)
+        put("offlineLeaseExpiresAtEpochMs", offlineLeaseExpiresAtEpochMs)
     }
 
     /**
@@ -88,6 +90,7 @@ data class OfflineVideoRecord(
         put("errorCode", errorCode)
         put("errorMessage", errorMessage)
         put("cipherFormat", cipherFormat)
+        put("offlineLeaseExpiresAtEpochMs", offlineLeaseExpiresAtEpochMs)
     }
 
     companion object {
@@ -114,7 +117,8 @@ data class OfflineVideoRecord(
             qualityLabel = obj.optString("qualityLabel", "720p"),
             errorCode = obj.optString("errorCode", ""),
             errorMessage = obj.optString("errorMessage", ""),
-            cipherFormat = obj.optString("cipherFormat", OfflineVideoVault.CIPHER_FORMAT_V1_CTR)
+            cipherFormat = obj.optString("cipherFormat", OfflineVideoVault.CIPHER_FORMAT_V1_CTR),
+            offlineLeaseExpiresAtEpochMs = obj.optLong("offlineLeaseExpiresAtEpochMs", 0L)
         )
     }
 }
@@ -144,6 +148,7 @@ class OfflineVideoVault(context: Context) {
     companion object {
         const val STATUS_NOT_DOWNLOADED = "NOT_DOWNLOADED"
         const val STATUS_DOWNLOADING = "DOWNLOADING"
+        const val STATUS_PAUSED = "PAUSED"
         const val STATUS_DOWNLOADED = "DOWNLOADED"
         const val STATUS_DOWNLOAD_FAILED = "DOWNLOAD_FAILED"
         const val STATUS_FILE_MISSING = "FILE_MISSING"
@@ -203,6 +208,77 @@ class OfflineVideoVault(context: Context) {
 
     private fun prefKey(studentId: String, lessonId: String): String =
         "dl_${studentNamespace(studentId)}_${sanitizeId(lessonId)}"
+
+    private fun leasePrefKey(studentId: String): String =
+        "lease_${studentNamespace(studentId)}"
+
+    private fun clockWatermarkKey(studentId: String): String =
+        "clock_${studentNamespace(studentId)}"
+
+    /**
+     * Persists a server-signed, device-bound offline authorization lease inside Keystore-backed
+     * EncryptedSharedPreferences (never student-editable plaintext storage).
+     */
+    fun saveStudentOfflineLease(
+        studentId: String,
+        leaseToken: String,
+        leaseExpiresAtEpochMs: Long,
+        subscriptionExpiresAtEpochMs: Long = 0L
+    ) {
+        val now = System.currentTimeMillis()
+        val obj = JSONObject().apply {
+            put("leaseToken", leaseToken)
+            put("leaseExpiresAtEpochMs", leaseExpiresAtEpochMs)
+            put("subscriptionExpiresAtEpochMs", subscriptionExpiresAtEpochMs)
+            put("updatedAtEpochMs", now)
+        }
+        val prevClock = prefs.getLong(clockWatermarkKey(studentId), 0L)
+        prefs.edit()
+            .putString(leasePrefKey(studentId), obj.toString())
+            .putLong(clockWatermarkKey(studentId), maxOf(prevClock, now))
+            .apply()
+    }
+
+    /**
+     * Verifies whether the student holds a valid, unexpired offline playback authorization lease.
+     * Detects basic system-clock rollback (> 10 minutes backwards) and expired leases.
+     */
+    fun checkOfflineLeaseValid(
+        studentId: String,
+        lessonId: String,
+        nowEpochMs: Long = System.currentTimeMillis()
+    ): Pair<Boolean, String> {
+        val lastClock = prefs.getLong(clockWatermarkKey(studentId), 0L)
+        if (lastClock > 0L && nowEpochMs + 600_000L < lastClock) {
+            return false to "Device clock rollback detected. Connect to the internet to re-verify your Class 10 subscription."
+        }
+        if (nowEpochMs > lastClock) {
+            prefs.edit().putLong(clockWatermarkKey(studentId), nowEpochMs).apply()
+        }
+
+        val record = getRecord(studentId, lessonId)
+        val recordLeaseExp = record?.offlineLeaseExpiresAtEpochMs ?: 0L
+        val studentLeaseRaw = prefs.getString(leasePrefKey(studentId), null)
+        val studentLeaseExp = if (!studentLeaseRaw.isNullOrBlank()) {
+            try {
+                JSONObject(studentLeaseRaw).optLong("leaseExpiresAtEpochMs", 0L)
+            } catch (_: Exception) {
+                0L
+            }
+        } else {
+            0L
+        }
+
+        val effectiveExp = when {
+            studentLeaseExp > 0L && recordLeaseExp > 0L -> studentLeaseExp
+            studentLeaseExp > 0L -> studentLeaseExp
+            else -> recordLeaseExp
+        }
+        if (effectiveExp > 0L && nowEpochMs > effectiveExp) {
+            return false to "Your offline viewing license has expired. Connect to the internet to verify your Class 10 subscription and renew offline access."
+        }
+        return true to ""
+    }
 
     fun getStudentDir(studentId: String): File {
         val dir = File(vaultRoot, studentNamespace(studentId))
@@ -394,6 +470,8 @@ class OfflineVideoVault(context: Context) {
                 editor.remove(key)
             }
         }
+        editor.remove(leasePrefKey(studentId))
+        editor.remove(clockWatermarkKey(studentId))
         editor.apply()
         return removedCount
     }

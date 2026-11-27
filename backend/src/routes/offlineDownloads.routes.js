@@ -28,7 +28,7 @@ const lessonProgressSchema = z.object({
 });
 
 const registerExternalAssetSchema = z.object({
-  storageProvider: z.enum(['cloudflare_r2', 'supabase_storage', 'pikpak_local', 'persistent_disk']),
+  storageProvider: z.enum(['persistent_disk', 'pikpak_local']),
   storageKey: z.string().min(1).max(512),
   originalFileName: z.string().max(180).optional(),
   qualityLabel: z.string().max(32).optional().default('720p'),
@@ -154,6 +154,21 @@ export function createOfflineDownloadRoutes({ offlineDownloadService, requireAut
     }
   });
 
+  router.post('/downloads/lease/refresh', requireAuth, async (req, res, next) => {
+    try {
+      const data = await offlineDownloadService.refreshOfflineLease({
+        user: req.user,
+        session: req.session,
+        device: req.device,
+        rawDeviceId: req.get('x-device-id') || null,
+      });
+      res.set('Cache-Control', 'no-store');
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get(
     '/downloads/:downloadId/status',
     requireAuth,
@@ -256,8 +271,8 @@ export function createOfflineDownloadRoutes({ offlineDownloadService, requireAut
 
 /**
  * Admin Authorized MP4 Ingestion Routes (mounted at /api/v1/admin).
- * Supports zero-buffer binary MP4 upload streaming + optional FFmpeg processing,
- * as well as attaching existing Cloudflare R2 / Supabase Storage / PikPak MP4 assets.
+ * Supports zero-buffer binary MP4 upload streaming + optional FFmpeg processing
+ * into private persistent server disk for encrypted local Android vault download.
  */
 export function createAdminOfflineAssetRoutes({
   offlineDownloadService,

@@ -46,6 +46,7 @@ class Class10OfflineDownloadPlugin : Plugin() {
         val lessonId: String,
         val studentId: String,
         val cancelled: AtomicBoolean = AtomicBoolean(false),
+        val paused: AtomicBoolean = AtomicBoolean(false),
         @Volatile var connection: HttpURLConnection? = null,
         @Volatile var future: Future<*>? = null
     )
@@ -76,6 +77,15 @@ class Class10OfflineDownloadPlugin : Plugin() {
     private fun jobKey(studentId: String, lessonId: String): String =
         "${studentId.trim()}::${OfflineVideoVault.sanitizeId(lessonId)}"
 
+    private fun readLongArg(call: PluginCall, key: String, defaultValue: Long = 0L): Long {
+        val raw = call.data?.opt(key) ?: return defaultValue
+        return when (raw) {
+            is Number -> raw.toLong()
+            is String -> raw.toLongOrNull() ?: defaultValue
+            else -> defaultValue
+        }
+    }
+
     private fun isAllowedDownloadUrl(rawUrl: String): Boolean {
         if (rawUrl.startsWith("https://")) return true
         if (BuildConfig.DEBUG && (
@@ -97,14 +107,26 @@ class Class10OfflineDownloadPlugin : Plugin() {
         val videoAssetId = call.getString("videoAssetId").orEmpty().trim()
         val streamUrl = call.getString("streamUrl").orEmpty().trim()
         val expectedChecksum = call.getString("sha256Checksum").orEmpty().trim().lowercase()
-        val expectedSize = call.getLong("fileSize") ?: 0L
+        val expectedSize = readLongArg(call, "fileSize", 0L)
         val title = call.getString("title") ?: "Class 10 Lesson"
         val chapterTitle = call.getString("chapterTitle") ?: ""
         val subjectTitle = call.getString("subjectTitle") ?: ""
         val thumbnailUrl = call.getString("thumbnailUrl") ?: ""
-        val durationSeconds = call.getLong("durationSeconds") ?: 0L
+        val durationSeconds = readLongArg(call, "durationSeconds", 0L)
         val watermarkText = call.getString("watermarkText") ?: ""
         val qualityLabel = call.getString("qualityLabel") ?: "720p"
+        val offlineLeaseToken = call.getString("offlineLeaseToken") ?: ""
+        val offlineLeaseExpiresAtEpochMs = readLongArg(call, "offlineLeaseExpiresAtEpochMs", 0L)
+        val subscriptionExpiresAtEpochMs = readLongArg(call, "subscriptionExpiresAtEpochMs", 0L)
+
+        if (offlineLeaseToken.isNotBlank() && offlineLeaseExpiresAtEpochMs > 0L) {
+            vault.saveStudentOfflineLease(
+                studentId = studentId,
+                leaseToken = offlineLeaseToken,
+                leaseExpiresAtEpochMs = offlineLeaseExpiresAtEpochMs,
+                subscriptionExpiresAtEpochMs = subscriptionExpiresAtEpochMs
+            )
+        }
 
         if (studentId.isEmpty() || lessonId.isEmpty() || downloadId.isEmpty() || streamUrl.isEmpty()) {
             call.reject("Missing required download parameters (studentId, lessonId, downloadId, streamUrl)")
@@ -178,7 +200,8 @@ class Class10OfflineDownloadPlugin : Plugin() {
                 thumbnailUrl = thumbnailUrl,
                 durationSeconds = durationSeconds,
                 watermarkText = watermarkText,
-                qualityLabel = qualityLabel
+                qualityLabel = qualityLabel,
+                offlineLeaseExpiresAtEpochMs = offlineLeaseExpiresAtEpochMs
             )
         }
 
@@ -209,7 +232,8 @@ class Class10OfflineDownloadPlugin : Plugin() {
         thumbnailUrl: String,
         durationSeconds: Long,
         watermarkText: String,
-        qualityLabel: String
+        qualityLabel: String,
+        offlineLeaseExpiresAtEpochMs: Long = 0L
     ) {
         val partFile = vault.getPartialVideoFile(studentId, lessonId)
         val finalFile = vault.getEncryptedVideoFile(studentId, lessonId)
@@ -280,7 +304,8 @@ class Class10OfflineDownloadPlugin : Plugin() {
                 nonceBase64 = nonceBase64,
                 watermarkText = watermarkText,
                 qualityLabel = qualityLabel,
-                cipherFormat = OfflineVideoVault.CIPHER_FORMAT_V2_GCM
+                cipherFormat = OfflineVideoVault.CIPHER_FORMAT_V2_GCM,
+                offlineLeaseExpiresAtEpochMs = offlineLeaseExpiresAtEpochMs
             )
             vault.saveRecord(record)
 
@@ -329,6 +354,10 @@ class Class10OfflineDownloadPlugin : Plugin() {
             BufferedInputStream(conn.inputStream, STREAM_CHUNK_BYTES).use { input ->
                 FileOutputStream(partFile, appendMode).use { output ->
                     while (true) {
+                        if (job.paused.get()) {
+                            handlePause(studentId, lessonId, downloadId, expectedSize, partFile)
+                            return
+                        }
                         if (job.cancelled.get() || Thread.currentThread().isInterrupted) {
                             handleCancellation(studentId, lessonId, downloadId, expectedSize)
                             return
@@ -463,7 +492,9 @@ class Class10OfflineDownloadPlugin : Plugin() {
             )
             Log.i(TAG, "Verified offline download complete: lessonId=$lessonId bytes=$expectedSize")
         } catch (ex: Exception) {
-            if (job.cancelled.get()) {
+            if (job.paused.get()) {
+                handlePause(studentId, lessonId, downloadId, expectedSize, partFile)
+            } else if (job.cancelled.get()) {
                 handleCancellation(studentId, lessonId, downloadId, expectedSize)
             } else {
                 Log.w(TAG, "Offline download interrupted/failed for $lessonId: ${ex.message}")
@@ -504,6 +535,89 @@ class Class10OfflineDownloadPlugin : Plugin() {
             }
             activeJobs.remove(key)
         }
+    }
+
+    private fun handlePause(
+        studentId: String,
+        lessonId: String,
+        downloadId: String,
+        expectedSize: Long,
+        partFile: java.io.File
+    ) {
+        val fullChunkPhysSize = AuthenticatedChunkedCipher.CHUNK_TOTAL_SIZE.toLong()
+        val completeChunks = if (partFile.exists()) partFile.length() / fullChunkPhysSize else 0L
+        val validPhysicalLen = completeChunks * fullChunkPhysSize
+        if (partFile.exists() && partFile.length() > validPhysicalLen) {
+            try {
+                java.io.RandomAccessFile(partFile, "rw").use { it.setLength(validPhysicalLen) }
+            } catch (_: Exception) {
+            }
+        }
+        val pausedPlaintextBytes = (completeChunks * AuthenticatedChunkedCipher.CHUNK_DATA_SIZE.toLong())
+            .coerceAtMost(expectedSize)
+        val prev = vault.getRecord(studentId, lessonId)
+        if (prev != null) {
+            vault.saveRecord(
+                prev.copy(
+                    status = OfflineVideoVault.STATUS_PAUSED,
+                    bytesDownloaded = pausedPlaintextBytes,
+                    errorCode = "",
+                    errorMessage = ""
+                )
+            )
+        }
+        val pct = if (expectedSize > 0) ((pausedPlaintextBytes * 100L) / expectedSize).toInt().coerceIn(0, 99) else 0
+        emitStateChanged(
+            lessonId,
+            downloadId,
+            OfflineVideoVault.STATUS_PAUSED,
+            pct,
+            pausedPlaintextBytes,
+            expectedSize,
+            "",
+            ""
+        )
+    }
+
+    @PluginMethod
+    fun pauseDownload(call: PluginCall) {
+        val studentId = call.getString("studentId").orEmpty().trim()
+        val lessonId = call.getString("lessonId").orEmpty().trim()
+        if (studentId.isEmpty() || lessonId.isEmpty()) {
+            call.reject("studentId and lessonId are required")
+            return
+        }
+        val key = jobKey(studentId, lessonId)
+        val job = activeJobs[key]
+        if (job != null) {
+            job.paused.set(true)
+            try {
+                job.connection?.disconnect()
+            } catch (_: Exception) {
+            }
+            call.resolve(JSObject().put("paused", true))
+        } else {
+            call.resolve(JSObject().put("paused", false))
+        }
+    }
+
+    @PluginMethod
+    fun updateOfflineLease(call: PluginCall) {
+        val studentId = call.getString("studentId").orEmpty().trim()
+        val leaseToken = call.getString("leaseToken").orEmpty().trim()
+        val leaseExpiresAtEpochMs = readLongArg(call, "leaseExpiresAtEpochMs", 0L)
+        val subscriptionExpiresAtEpochMs = readLongArg(call, "subscriptionExpiresAtEpochMs", 0L)
+        if (studentId.isEmpty() || leaseToken.isEmpty() || leaseExpiresAtEpochMs <= 0L) {
+            call.reject("studentId, leaseToken, and leaseExpiresAtEpochMs are required")
+            return
+        }
+        vault.saveStudentOfflineLease(
+            studentId = studentId,
+            leaseToken = leaseToken,
+            leaseExpiresAtEpochMs = leaseExpiresAtEpochMs,
+            subscriptionExpiresAtEpochMs = subscriptionExpiresAtEpochMs
+        )
+        call.resolve(JSObject().put("updated", true))
     }
 
     private fun handleCancellation(studentId: String, lessonId: String, downloadId: String, expectedSize: Long) {
@@ -616,7 +730,7 @@ class Class10OfflineDownloadPlugin : Plugin() {
     fun updateOfflineProgress(call: PluginCall) {
         val studentId = call.getString("studentId").orEmpty().trim()
         val lessonId = call.getString("lessonId").orEmpty().trim()
-        val lastPositionMs = call.getLong("lastPositionMs") ?: 0L
+        val lastPositionMs = readLongArg(call, "lastPositionMs", 0L)
         val completed = call.getBoolean("completed") ?: false
         if (studentId.isEmpty() || lessonId.isEmpty()) {
             call.reject("studentId and lessonId are required")

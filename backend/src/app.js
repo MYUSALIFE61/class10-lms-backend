@@ -162,6 +162,7 @@ export function createApp({
     curriculumService,
     playbackService,
     videoSyncService,
+    config,
   });
   const assessmentService = new AssessmentService({
     store,
@@ -244,6 +245,7 @@ export function createApp({
     videoProvider: resolvedVideoProvider,
     supabaseAdmin: store?.db || null,
   });
+  playbackService.offlineStorageService = offlineStorageService;
   const offlineDownloadService = new OfflineDownloadService({
     store,
     subscriptionService,

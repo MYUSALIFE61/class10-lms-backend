@@ -191,7 +191,7 @@ describe('Phase 4: LMSVideoPlayer (Official YouTube IFrame Player API)', () => {
     expect(screen.getByTestId('student-watermark')).toHaveTextContent('TS10-XY99');
   });
 
-  it('renders pikpak_local and cloudflare_r2 providers inside Own LMS Player with zero YouTube iframe', () => {
+  it('renders pikpak_local and private_asset_stream providers inside Own LMS Player with zero YouTube iframe', () => {
     render(
       <NetworkProvider>
         <LMSVideoPlayer

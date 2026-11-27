@@ -4,7 +4,26 @@ import {
   generateStudentCode,
   sha256Hex,
 } from '../utils/crypto.js';
-import { ForbiddenError, UnauthorizedError } from '../utils/errors.js';
+import { ConflictError, ForbiddenError, UnauthorizedError } from '../utils/errors.js';
+import { buildSubscriptionSummary } from './paymentService.js';
+
+export function formatStudentProfileDto(profile) {
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    fullName: profile.full_name,
+    username: profile.username || null,
+    email: profile.email,
+    phone: profile.phone,
+    state: profile.state || (profile.board === 'TS' ? 'Telangana' : 'Andhra Pradesh'),
+    district: profile.district || '',
+    schoolName: profile.school || '',
+    className: profile.class_name || 'Class 10',
+    board: profile.board,
+    studentCode: profile.student_code,
+    role: profile.role,
+  };
+}
 
 export class AuthService {
   constructor({ store, authProvider, deviceService, config }) {
@@ -63,13 +82,29 @@ export class AuthService {
     email,
     password,
     fullName,
+    username = null,
     phone = null,
+    state = null,
+    district = '',
+    schoolName = '',
+    className = 'Class 10',
     board = 'AP',
     device,
     ipAddress = null,
     userAgent = null,
   }) {
     const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUsername = username ? username.trim().toLowerCase() : null;
+    const normalizedPhone = phone ? phone.replace(/[\s\-]/g, '').trim() : null;
+    const resolvedState = state?.trim() || (board === 'TS' ? 'Telangana' : 'Andhra Pradesh');
+
+    if (normalizedUsername && this.store.getProfileByUsername) {
+      const existingUsername = await this.store.getProfileByUsername(normalizedUsername);
+      if (existingUsername) {
+        throw new ConflictError('Username is already taken. Please choose another.', 'USERNAME_EXISTS');
+      }
+    }
+
     const authUser = await this.authProvider.signUp({
       email: normalizedEmail,
       password,
@@ -78,16 +113,32 @@ export class AuthService {
 
     let profile = await this.store.getProfileById(authUser.id);
     if (!profile) {
-      profile = await this.store.createProfile({
-        id: authUser.id,
-        full_name: fullName.trim(),
-        email: normalizedEmail,
-        phone: phone || null,
-        board,
-        student_code: generateStudentCode(board),
-        role: 'student',
-        is_active: true,
-      });
+      try {
+        profile = await this.store.createProfile({
+          id: authUser.id,
+          full_name: fullName.trim(),
+          username: normalizedUsername,
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          board,
+          state: resolvedState,
+          district: district.trim(),
+          school: schoolName.trim(),
+          class_name: className.trim() || 'Class 10',
+          student_code: generateStudentCode(board),
+          role: 'student',
+          is_active: true,
+        });
+      } catch (err) {
+        const msg = String(err?.message || '').toLowerCase();
+        if (msg.includes('username')) {
+          throw new ConflictError('Username is already taken. Please choose another.', 'USERNAME_EXISTS');
+        }
+        if (msg.includes('phone')) {
+          throw new ConflictError('An account with this mobile number already exists.', 'PHONE_EXISTS');
+        }
+        throw err;
+      }
     }
 
     return this._createAuthenticatedSession({
@@ -99,9 +150,15 @@ export class AuthService {
   }
 
   async login({ email, password, device, ipAddress = null, userAgent = null }) {
-    const normalizedEmail = email.trim().toLowerCase();
+    let resolvedEmail = email.trim().toLowerCase();
+    if (!resolvedEmail.includes('@') && typeof this.store.getProfileByUsername === 'function') {
+      const byUsername = await this.store.getProfileByUsername(resolvedEmail);
+      if (byUsername?.email) {
+        resolvedEmail = byUsername.email.trim().toLowerCase();
+      }
+    }
     const authUser = await this.authProvider.verifyCredentials({
-      email: normalizedEmail,
+      email: resolvedEmail,
       password,
     });
 
@@ -186,16 +243,11 @@ export class AuthService {
       });
     }
 
+    const latestSub = await this.store.getLatestSubscription(profile.id);
+    const subscription = buildSubscriptionSummary(latestSub);
+
     return {
-      user: {
-        id: profile.id,
-        fullName: profile.full_name,
-        email: profile.email,
-        phone: profile.phone,
-        board: profile.board,
-        studentCode: profile.student_code,
-        role: profile.role,
-      },
+      user: formatStudentProfileDto(profile),
       device: {
         id: registeredDevice.id,
         deviceName: registeredDevice.device_name,
@@ -206,6 +258,7 @@ export class AuthService {
         tokenType: 'Bearer',
         expiresIn: this.config.JWT_ACCESS_TTL,
       },
+      subscription,
       securityNotice: concurrentDetected
         ? 'Another active session was detected and flagged for account safety.'
         : null,

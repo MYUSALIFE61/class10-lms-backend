@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 import { assertSubjectScope } from './adminRbac.js';
-import { saveUploadedFile, resolveUploadedFilePath } from '../repositories/adminStoreExtension.js';
+import {
+  saveUploadedFile,
+  resolveUploadedFilePath,
+  resolveResourcesUploadDir,
+} from '../repositories/adminStoreExtension.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 export const CONTENT_STATUSES = ['draft', 'under_review', 'approved', 'scheduled', 'published', 'archived'];
@@ -39,12 +43,26 @@ function boardCodesToLegacyBoard(codes) {
 }
 
 export class AdminCmsService {
-  constructor({ store, adminAuthService, curriculumService, playbackService, videoSyncService = null }) {
+  constructor({
+    store,
+    adminAuthService,
+    curriculumService,
+    playbackService,
+    videoSyncService = null,
+    config = {},
+  }) {
     this.store = store;
     this.adminAuthService = adminAuthService;
     this.curriculumService = curriculumService;
     this.playbackService = playbackService;
     this.videoSyncService = videoSyncService;
+    this.config = config;
+  }
+
+  _getResourcesUploadDir() {
+    return this.config?.RESOURCES_UPLOAD_DIR
+      ? resolveResourcesUploadDir(this.config.RESOURCES_UPLOAD_DIR)
+      : resolveResourcesUploadDir();
   }
 
   _invalidateCatalogCache() {
@@ -709,6 +727,7 @@ export class AdminCmsService {
         fileName: data.fileName || `${slugify(data.title)}.pdf`,
         mimeType,
         contentBase64: data.contentBase64,
+        uploadDir: this._getResourcesUploadDir(),
       });
       storagePath = saved.storagePath;
       fileSizeBytes = saved.fileSizeBytes;
@@ -776,6 +795,7 @@ export class AdminCmsService {
         fileName: patch.fileName || existing.file_name || 'resource.pdf',
         mimeType,
         contentBase64: patch.contentBase64,
+        uploadDir: this._getResourcesUploadDir(),
       });
       dbPatch.storage_path = saved.storagePath;
       dbPatch.file_size_bytes = saved.fileSizeBytes;
@@ -796,6 +816,8 @@ export class AdminCmsService {
   }
 
   getResourceDiskPath(resource) {
-    return resolveUploadedFilePath(resource.storage_path);
+    return resolveUploadedFilePath(resource.storage_path, {
+      uploadDir: this._getResourcesUploadDir(),
+    });
   }
 }

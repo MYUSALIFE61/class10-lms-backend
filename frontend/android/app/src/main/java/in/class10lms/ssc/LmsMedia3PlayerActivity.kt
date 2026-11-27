@@ -250,6 +250,11 @@ class LmsMedia3PlayerActivity : AppCompatActivity() {
                 showError("Downloaded offline lesson file is missing or not verified. Please re-download.")
                 return
             }
+            val (leaseValid, leaseErrorMsg) = vault.checkOfflineLeaseValid(offlineStudentId, offlineLessonId)
+            if (!leaseValid) {
+                showError(leaseErrorMsg)
+                return
+            }
             if (effectiveStartPosMs == 0L && verified.lastPositionMs > 0L) {
                 effectiveStartPosMs = verified.lastPositionMs
             }

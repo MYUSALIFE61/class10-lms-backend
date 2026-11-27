@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { PlayCircle, CheckCircle2, Trophy, Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { PlayCircle, CheckCircle2, Trophy, Clock, ChevronRight } from 'lucide-react';
 import { AppLayout } from '../components/common/AppLayout.jsx';
 import { EmptyState, ErrorState, LoadingSkeleton } from '../components/common/StateViews.jsx';
 import { lmsApi } from '../services/lmsApi.js';
 
 export function ProgressPage() {
+  const navigate = useNavigate();
   const [progress, setProgress] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,7 +62,11 @@ export function ProgressPage() {
               </div>
             </div>
             <div style={{ marginTop: 8, fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-muted)' }}>
-              Live Database Progress
+              Overall Learning Progress
+              {typeof progress.totalChapters === 'number' ? ` • ${progress.totalChapters} Chapters` : ''}
+              {typeof progress.inProgressLessons === 'number' && progress.inProgressLessons > 0
+                ? ` • ${progress.inProgressLessons} In Progress`
+                : ''}
             </div>
           </div>
 
@@ -108,6 +114,45 @@ export function ProgressPage() {
               ))
             )}
           </div>
+
+          {(progress.recentLessons || []).length > 0 && (
+            <div className="card">
+              <h2 style={{ margin: '0 0 12px', fontSize: '1rem', fontWeight: 800 }}>Recently Accessed Lessons</h2>
+              {progress.recentLessons.map((item) => (
+                <button
+                  key={item.lessonId}
+                  type="button"
+                  onClick={() => navigate(`/lessons/${item.lessonId}`)}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom: '1px solid #eef4ff',
+                    padding: '10px 0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--text)' }}>{item.title}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                      {item.subjectTitle} &bull; {item.chapterTitle}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    <span className={`badge ${item.isCompleted ? 'badge-green' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
+                      {item.isCompleted ? 'Completed' : `${item.completionPercent ?? 0}%`}
+                    </span>
+                    <ChevronRight size={16} color="#64748b" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
           {(progress.recentQuizzes || []).length > 0 && (
             <div className="card">

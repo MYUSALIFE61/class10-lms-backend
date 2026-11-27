@@ -51,14 +51,14 @@ export class VideoSyncService {
   }
 
   /**
-   * Scans the active video provider (PikPak local CLI today, swappable to Cloudflare R2)
+   * Scans the active local video provider (PikPak local CLI)
    * and upserts discovered video files into the LMS catalog so they appear immediately
    * on the Student Dashboard and inside the "Uploaded Video Lessons" chapter.
    */
   async syncVideos({ defaultPremium = false } = {}) {
     if (!this.videoProvider || typeof this.videoProvider.listVideos !== 'function') {
       throw new AppError(
-        'No active video sync provider configured. Set VIDEO_STORAGE_PROVIDER=pikpak_local or cloudflare_r2.',
+        'No active video sync provider configured. Upload lesson MP4s to private backend persistent disk or set VIDEO_STORAGE_PROVIDER=pikpak_local.',
         400,
         'VIDEO_PROVIDER_NOT_CONFIGURED'
       );

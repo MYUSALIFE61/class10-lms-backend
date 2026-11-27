@@ -54,6 +54,11 @@ export function AuthProvider({ children }) {
       });
       setStatus('authenticated');
       flushPendingOfflineSync().catch(() => {});
+      if (data.subscription?.isActive && data.user?.id) {
+        offlineDownloadService.refreshOfflineLease({ studentId: data.user.id }).catch(() => {});
+      } else if (data.subscription && !data.subscription.isActive && data.user?.id) {
+        offlineDownloadService.expireLocalOfflineLease?.({ studentId: data.user.id }).catch(() => {});
+      }
     } catch (err) {
       // Offline restart resilience: preserve authenticated session when device has no internet
       // so students can open My Downloads and play verified encrypted lessons offline.
@@ -107,6 +112,9 @@ export function AuthProvider({ children }) {
 
     const handleOnline = () => {
       flushPendingOfflineSync().catch(() => {});
+      if (userRef.current?.id) {
+        offlineDownloadService.refreshOfflineLease({ studentId: userRef.current.id }).catch(() => {});
+      }
     };
     window.addEventListener('online', handleOnline);
 
@@ -124,15 +132,26 @@ export function AuthProvider({ children }) {
       setUser(data.user);
       setDevice(data.device);
       const me = await lmsApi.getMe();
-      setSubscription(me.subscription);
+      const resolvedSub = me.subscription || data.subscription || {
+        status: 'unpaid',
+        isActive: false,
+        startsAt: null,
+        expiresAt: null,
+      };
+      setSubscription(resolvedSub);
       await persistSessionSnapshot({
         user: data.user,
-        subscription: me.subscription,
+        subscription: resolvedSub,
         device: data.device,
       });
       setStatus('authenticated');
       flushPendingOfflineSync().catch(() => {});
-      return data;
+      if (resolvedSub?.isActive && data.user?.id) {
+        offlineDownloadService.refreshOfflineLease({ studentId: data.user.id }).catch(() => {});
+      } else if (resolvedSub && !resolvedSub.isActive && data.user?.id) {
+        offlineDownloadService.expireLocalOfflineLease?.({ studentId: data.user.id }).catch(() => {});
+      }
+      return { ...data, subscription: resolvedSub };
     },
     [persistSessionSnapshot]
   );
@@ -142,7 +161,12 @@ export function AuthProvider({ children }) {
       setSessionAlert(null);
       const data = await lmsApi.register(payload);
       await saveTokens(data.tokens);
-      const sub = { status: 'unpaid', isActive: false, startsAt: null, expiresAt: null };
+      const sub = data.subscription || {
+        status: 'unpaid',
+        isActive: false,
+        startsAt: null,
+        expiresAt: null,
+      };
       setUser(data.user);
       setDevice(data.device);
       setSubscription(sub);
@@ -152,7 +176,7 @@ export function AuthProvider({ children }) {
         device: data.device,
       });
       setStatus('authenticated');
-      return data;
+      return { ...data, subscription: sub };
     },
     [persistSessionSnapshot]
   );

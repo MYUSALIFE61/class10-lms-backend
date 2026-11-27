@@ -147,6 +147,14 @@ export function LessonDetailsScreen({
     });
   };
 
+  const handlePauseDownload = async () => {
+    await offlineDownloadService.pauseDownload({
+      studentId,
+      lessonId,
+      downloadId: dlState.downloadId,
+    });
+  };
+
   const handleWatchNow = async () => {
     // Re-verify actual local file existence right before opening InAppVideoPlayer
     const latest = await offlineDownloadService.getVerifiedLessonState({
@@ -156,6 +164,17 @@ export function LessonDetailsScreen({
     });
     if (latest.status !== DOWNLOAD_STATES.DOWNLOADED) {
       setDlState((prev) => ({ ...prev, ...latest }));
+      setPlayingOffline(false);
+      return;
+    }
+    // Part 6: Verify time-limited server-signed offline authorization lease before playback
+    const leaseCheck = offlineDownloadService.isOfflineLeaseValid({ studentId, lessonId });
+    if (!leaseCheck.valid) {
+      setDlState((prev) => ({
+        ...prev,
+        errorCode: 'OFFLINE_LEASE_EXPIRED',
+        errorMessage: leaseCheck.reason,
+      }));
       setPlayingOffline(false);
       return;
     }
@@ -330,7 +349,8 @@ export function LessonDetailsScreen({
             )}
 
             {(effectiveStatus === DOWNLOAD_STATES.DOWNLOAD_FAILED ||
-              effectiveStatus === DOWNLOAD_STATES.FILE_MISSING) && (
+              effectiveStatus === DOWNLOAD_STATES.FILE_MISSING ||
+              dlState.errorCode === 'OFFLINE_LEASE_EXPIRED') && (
               <DownloadErrorComponent
                 errorCode={dlState.errorCode}
                 message={dlState.errorMessage}
@@ -346,6 +366,8 @@ export function LessonDetailsScreen({
                 fileSizeLabel={fileSizeBytes > 0 ? formatBytes(fileSizeBytes) : ''}
                 disabled={checkingLocal}
                 onDownload={() => handleStartDownload(false)}
+                onPause={handlePauseDownload}
+                onResume={() => handleStartDownload(false)}
                 onCancel={handleCancelDownload}
                 onWatchNow={handleWatchNow}
                 onRetry={() => handleStartDownload(true)}

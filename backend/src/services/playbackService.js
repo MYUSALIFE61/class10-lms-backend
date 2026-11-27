@@ -26,6 +26,7 @@ export class PlaybackService {
     deviceService,
     integrityService,
     videoProvider = null,
+    offlineStorageService = null,
     config = {},
   }) {
     this.store = store;
@@ -33,6 +34,7 @@ export class PlaybackService {
     this.deviceService = deviceService;
     this.integrityService = integrityService;
     this.videoProvider = videoProvider;
+    this.offlineStorageService = offlineStorageService;
     this.config = config;
   }
 
@@ -48,11 +50,12 @@ export class PlaybackService {
    * Signs a short-lived HMAC-SHA256 stream token bound to (userId, lessonId, deviceId, fileId, exp).
    * Clients receive only this token in the backend stream URL — never PikPak credentials or signed CDN URLs.
    */
-  signStreamToken({ lessonId, fileId, userId, deviceId, mimeType = 'video/mp4', ttlSeconds = null }) {
+  signStreamToken({ lessonId, fileId = null, assetId = null, userId, deviceId, mimeType = 'video/mp4', ttlSeconds = null }) {
     const ttl = ttlSeconds || this.config.STREAM_TOKEN_TTL_SECONDS || 900;
     const payload = {
       lid: lessonId,
-      fid: fileId,
+      ...(fileId ? { fid: fileId } : {}),
+      ...(assetId ? { aid: assetId } : {}),
       uid: userId,
       did: deviceId || '',
       mime: mimeType,
@@ -95,7 +98,7 @@ export class PlaybackService {
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) {
       throw new UnauthorizedError('Playback stream token has expired', 'STREAM_TOKEN_EXPIRED');
     }
-    if (!payload.fid || !payload.lid) {
+    if ((!payload.fid && !payload.aid) || !payload.lid) {
       throw new UnauthorizedError('Incomplete stream token payload', 'INVALID_STREAM_TOKEN');
     }
     return payload;
@@ -103,6 +106,26 @@ export class PlaybackService {
 
   async streamAuthorizedToken({ streamToken, req, res }) {
     const claims = this.verifyStreamToken(streamToken);
+    if (claims.aid) {
+      if (!this.offlineStorageService || typeof this.offlineStorageService.streamAssetToResponse !== 'function') {
+        throw new AppError(
+          'Private offline asset streaming service is not configured.',
+          503,
+          'VIDEO_PROVIDER_UNAVAILABLE'
+        );
+      }
+      const asset = await this.store.getLessonVideoAssetById(claims.aid);
+      if (!asset || !asset.is_downloadable || asset.transcoding_status !== 'ready') {
+        throw new NotFoundError('Authorized lesson video asset is unavailable.', 'VIDEO_UNAVAILABLE');
+      }
+      return this.offlineStorageService.streamAssetToResponse({
+        asset,
+        userId: claims.uid,
+        deviceId: claims.did || '',
+        req,
+        res,
+      });
+    }
     if (!this.videoProvider || typeof this.videoProvider.streamVideoToResponse !== 'function') {
       throw new AppError(
         'Local video streaming provider is not enabled on this server.',
@@ -196,15 +219,39 @@ export class PlaybackService {
       }
     }
 
-    // Step 6: Fetch video source from isolated vault & validate YouTube ID
-    const source = await this.store.getLessonVideoSource(lesson.id);
+    // Step 6: Fetch video source from lesson_video_sources, falling back to ready lesson_video_assets
+    let source = await this.store.getLessonVideoSource(lesson.id);
+    if (!source && typeof this.store.getDefaultDownloadableAssetForLesson === 'function') {
+      const asset = await this.store.getDefaultDownloadableAssetForLesson(lesson.id);
+      if (asset && asset.transcoding_status === 'ready') {
+        source = {
+          provider: 'private_asset_stream',
+          asset_id: asset.id,
+          mime_type: asset.mime_type || 'video/mp4',
+        };
+      }
+    }
     if (!source) {
       await this._audit(user.id, device?.id, lessonId, false, 'VIDEO_SOURCE_MISSING', ipAddress);
       throw new NotFoundError('Video source is not configured for this lesson yet.', 'VIDEO_UNAVAILABLE');
     }
 
     let signedStreamUrl = null;
-    if (source.provider === 'youtube_unlisted') {
+    if (source.provider === 'private_asset_stream') {
+      const streamToken = this.signStreamToken({
+        lessonId: lesson.id,
+        assetId: source.asset_id,
+        userId: user.id,
+        deviceId: device?.id || session?.device_id || '',
+        mimeType: source.mime_type || 'video/mp4',
+      });
+      const base = (
+        this.config.PUBLIC_API_BASE_URL ||
+        apiBaseUrl ||
+        `http://127.0.0.1:${this.config.PORT || 4000}`
+      ).replace(/\/+$/, '');
+      signedStreamUrl = `${base}/api/v1/playback/stream/${streamToken}`;
+    } else if (source.provider === 'youtube_unlisted') {
       if (!isValidYouTubeVideoId(source.youtube_video_id)) {
         await this._audit(user.id, device?.id, lessonId, false, 'INVALID_YOUTUBE_VIDEO_ID', ipAddress);
         throw new AppError(
@@ -253,23 +300,13 @@ export class PlaybackService {
         `http://127.0.0.1:${this.config.PORT || 4000}`
       ).replace(/\/+$/, '');
       signedStreamUrl = `${base}/api/v1/playback/stream/${streamToken}`;
-    } else if (source.provider === 'cloudflare_r2') {
-      if (!source.provider_file_id) {
-        await this._audit(user.id, device?.id, lessonId, false, 'MISSING_R2_OBJECT_KEY', ipAddress);
-        throw new AppError('Cloudflare R2 object key is missing.', 422, 'INVALID_VIDEO_ID');
-      }
-      if (!this.videoProvider || typeof this.videoProvider.createSignedPlaybackUrl !== 'function') {
-        throw new AppError(
-          'Cloudflare R2 video provider is not configured on this server.',
-          503,
-          'VIDEO_PROVIDER_UNAVAILABLE'
-        );
-      }
-      signedStreamUrl = this.videoProvider.createSignedPlaybackUrl({
-        objectKey: source.provider_file_id,
-        userId: user.id,
-        deviceId: device?.id || session?.device_id || '',
-      });
+    } else if (source.provider === 'cloudflare_r2' || source.provider === 'supabase_storage' || source.provider === 'aws_s3' || source.provider === 'firebase_storage') {
+      await this._audit(user.id, device?.id, lessonId, false, 'CLOUD_STORAGE_DISABLED', ipAddress);
+      throw new AppError(
+        'Third-party cloud object storage is disabled by architecture policy. Stream from authorized private server disk assets instead.',
+        410,
+        'CLOUD_STORAGE_DISABLED'
+      );
     }
 
     // Step 7: Fetch resume progress + sibling prev/next navigation
@@ -347,13 +384,21 @@ export class PlaybackService {
     const effectiveDuration = Math.max(durationSeconds || lesson.duration_seconds || 0, 1);
     const clampedPos = Math.min(Math.max(0, Math.floor(positionSeconds)), effectiveDuration);
     const pct = Math.min(100, Math.round((clampedPos / effectiveDuration) * 100));
-    const isCompleted = markCompleted || pct >= 90;
 
     const existing = await this.store.getLessonProgress(userId, lessonId);
-    const finalCompleted = Boolean(existing?.is_completed || isCompleted);
-    const finalPct = Math.max(existing?.completion_percent || 0, finalCompleted ? 100 : pct);
+    const prevPct = Number(existing?.completion_percent || 0);
+
+    // Backend-enforced completion rule:
+    // - Automatic completion at >= 90% watched duration
+    // - Explicit markCompleted accepted only when watched >= 80% (or non-video lesson duration <= 1s)
+    // - Never marks a lesson completed merely because it was opened (0% watched)
+    const eligibleForCompletion =
+      pct >= 90 || (Boolean(markCompleted) && (pct >= 80 || prevPct >= 80 || effectiveDuration <= 1));
+    const finalCompleted = Boolean(existing?.is_completed || eligibleForCompletion);
+    const finalPct = Math.max(prevPct, finalCompleted ? 100 : pct);
     const prevWatch = Number(existing?.watch_time_seconds || 0);
     const watchTimeSeconds = Math.max(prevWatch, clampedPos);
+    const nowIso = new Date().toISOString();
 
     const saved = await this.store.upsertLessonProgress({
       user_id: userId,
@@ -363,15 +408,20 @@ export class PlaybackService {
       watch_time_seconds: watchTimeSeconds,
       completion_percent: finalPct,
       is_completed: finalCompleted,
-      completed_at: finalCompleted ? existing?.completed_at || new Date().toISOString() : null,
+      completed_at: finalCompleted ? existing?.completed_at || nowIso : null,
+      last_accessed_at: nowIso,
     });
 
     return {
       lessonId: saved.lesson_id,
+      subjectId: lesson.subject_id,
+      chapterId: lesson.chapter_id,
       lastPositionSeconds: saved.last_position_seconds,
       durationSeconds: saved.duration_seconds,
       completionPercent: saved.completion_percent,
       isCompleted: saved.is_completed,
+      completedAt: saved.completed_at || null,
+      lastAccessedAt: saved.last_accessed_at || saved.updated_at || nowIso,
     };
   }
 

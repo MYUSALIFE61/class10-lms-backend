@@ -97,11 +97,17 @@ export function DashboardPage() {
   const videoProvider = dashboard?.videoProvider;
   const firstName = user?.fullName?.split(' ')[0] || 'Student';
   const totalCourses = dashboard?.stats?.totalSubjects ?? subjects.length;
+  const totalChapters = dashboard?.stats?.totalChapters ?? subjects.reduce((acc, s) => acc + (s.chapterCount || 0), 0);
+  const totalLessons = dashboard?.stats?.totalLessons ?? subjects.reduce((acc, s) => acc + (s.lessonCount || 0), 0);
   const completedCount = dashboard?.stats?.completedLessons ?? 0;
   const progressPct = dashboard?.stats?.overallProgressPercent ?? 0;
   const unreadCount = dashboard?.stats?.unreadNotificationsCount ?? 0;
+  const recentLessons = dashboard?.recentlyAccessedLessons || [];
+  const expiryLabel = sub?.expiresAt
+    ? new Date(sub.expiresAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : null;
 
-  const featuredVideo = syncedVideos[0] || featuredLessons[0] || null;
+  const featuredVideo = recentLessons[0] || syncedVideos[0] || featuredLessons[0] || null;
   const extraSyncedVideos = syncedVideos.length > 0 ? syncedVideos.slice(1) : [];
   const featuredPercent = featuredVideo
     ? Math.max(0, Math.min(100, featuredVideo.progress?.completionPercent ?? 0))
@@ -219,7 +225,7 @@ export function DashboardPage() {
                 <Crown size={13} fill="#b45309" color="#b45309" />
                 <span>
                   {sub?.isActive
-                    ? 'Active Class 10 SSC Pass'
+                    ? `Active Class 10 SSC Pass${expiryLabel ? ` • Valid till ${expiryLabel}` : ''}`
                     : activePlan
                       ? `Unlock ${activePlan.name} (₹${activePlan.priceRupees})`
                       : 'Unlock Premium – Full Access'}
@@ -235,27 +241,37 @@ export function DashboardPage() {
           </section>
 
           {/* 2. Live Database Stats Cards */}
-          <section className="lms-stats-row" aria-label="Learning summary">
+          <section className="lms-stats-row lms-stats-row-4" aria-label="Learning summary">
             <button type="button" className="lms-stat-card-v2" onClick={() => navigate('/courses')}>
-              <BookOpen size={22} color="#1d5ef2" strokeWidth={2.1} />
-              <div className="lms-stat-label">My Courses</div>
+              <BookOpen size={20} color="#1d5ef2" strokeWidth={2.1} />
+              <div className="lms-stat-label">Subjects</div>
               <div className="lms-stat-value">{totalCourses}</div>
+              <div className="lms-stat-sub">{totalChapters} Ch</div>
+            </button>
+
+            <button type="button" className="lms-stat-card-v2" onClick={() => navigate('/courses')}>
+              <Play size={20} color="#7c3aed" strokeWidth={2.1} />
+              <div className="lms-stat-label">Lessons</div>
+              <div className="lms-stat-value">{totalLessons}</div>
+              <div className="lms-stat-sub">Published</div>
             </button>
 
             <button type="button" className="lms-stat-card-v2" onClick={() => navigate('/progress')}>
-              <CheckCircle2 size={22} color="#16a34a" strokeWidth={2.1} />
+              <CheckCircle2 size={20} color="#16a34a" strokeWidth={2.1} />
               <div className="lms-stat-label">Completed</div>
               <div className="lms-stat-value">{completedCount}</div>
+              <div className="lms-stat-sub">Lessons</div>
             </button>
 
             <button type="button" className="lms-stat-card-v2" onClick={() => navigate('/progress')}>
-              <TrendingUp size={22} color="#1d5ef2" strokeWidth={2.2} />
+              <TrendingUp size={20} color="#1d5ef2" strokeWidth={2.2} />
               <div className="lms-stat-label">Progress</div>
               <div className="lms-stat-value">{progressPct}%</div>
+              <div className="lms-stat-sub">Overall</div>
             </button>
           </section>
 
-          {/* 3. Dynamic My Subjects Strip (Real DB Subjects & Real DB Completion %) */}
+          {/* 3. Dynamic My Subjects Strip (Real DB Subjects, Chapters, Lessons & Completion %) */}
           <section className="lms-section">
             <div className="lms-section-head">
               <h3>My Subjects</h3>
@@ -286,9 +302,12 @@ export function DashboardPage() {
                     onClick={() => navigate(`/subjects/${subject.id}`, { state: { subject } })}
                   >
                     <div className="lms-subject-mini-icon">
-                      <Icon size={25} color={st.iconColor} strokeWidth={2} />
+                      <Icon size={24} color={st.iconColor} strokeWidth={2} />
                     </div>
                     <div className="lms-subject-mini-name">{shortTitle}</div>
+                    <div className="lms-subject-mini-counts">
+                      {subject.chapterCount ?? 0} Ch &bull; {subject.lessonCount ?? 0} Ls
+                    </div>
                     <div className="lms-subject-mini-pct">{pct}%</div>
                     <div className="lms-mini-bar-track">
                       <div className="lms-mini-bar-fill" style={{ width: `${pct}%`, background: st.barColor }} />
@@ -298,6 +317,47 @@ export function DashboardPage() {
               })}
             </div>
           </section>
+
+          {/* 3b. Recently Accessed Lessons (Real Student History Only) */}
+          {recentLessons.length > 0 && (
+            <section className="lms-section" aria-label="Recently accessed lessons">
+              <div className="lms-section-head">
+                <h3>Recently Accessed</h3>
+                <button type="button" className="lms-link-btn" onClick={() => navigate('/progress')}>
+                  History &gt;
+                </button>
+              </div>
+              <div className="lms-extra-videos-list">
+                {recentLessons.slice(0, 3).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="lms-extra-video-row"
+                    onClick={() => navigate(`/lessons/${item.id}`)}
+                  >
+                    <span className="lms-extra-play-icon">
+                      {item.progress?.isCompleted ? (
+                        <CheckCircle2 size={15} color="#10b981" />
+                      ) : (
+                        <Play size={14} fill="#1152d4" color="#1152d4" />
+                      )}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                      <div className="lms-extra-video-title">{item.title}</div>
+                      <div className="lms-extra-video-meta">
+                        {item.subjectTitle}
+                        {item.chapterTitle ? ` • ${item.chapterTitle}` : ''} &bull;{' '}
+                        {item.progress?.isCompleted
+                          ? 'Completed'
+                          : `${item.progress?.completionPercent || 0}% watched`}
+                      </div>
+                    </div>
+                    <ChevronRight size={17} color="#64748b" />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
 
           {/* 4. Dynamic Continue Learning Section */}
           <section className="lms-section" data-testid="synced-videos-section">
@@ -390,16 +450,16 @@ export function DashboardPage() {
             )}
           </section>
 
-          {/* 5. Dynamic Upcoming Exam Card (From Database) */}
-          <section className="lms-section">
-            <div className="lms-section-head">
-              <h3>Upcoming Exam</h3>
-              <button type="button" className="lms-link-btn" onClick={() => navigate('/exams')}>
-                See All &gt;
-              </button>
-            </div>
+          {/* 5. Dynamic Upcoming Exam Card (Rendered Only When Real Exam Data Exists) */}
+          {nextExam && (
+            <section className="lms-section">
+              <div className="lms-section-head">
+                <h3>Upcoming Exam</h3>
+                <button type="button" className="lms-link-btn" onClick={() => navigate('/exams')}>
+                  See All &gt;
+                </button>
+              </div>
 
-            {nextExam ? (
               <button type="button" className="lms-exam-card" onClick={() => navigate('/exams')}>
                 <div className="lms-exam-left">
                   <div className="lms-exam-icon">
@@ -420,21 +480,8 @@ export function DashboardPage() {
                   <ChevronRight size={18} color="#64748b" />
                 </div>
               </button>
-            ) : (
-              <button type="button" className="lms-exam-card" onClick={() => navigate('/exams')}>
-                <div className="lms-exam-left">
-                  <div className="lms-exam-icon">
-                    <Calendar size={22} color="#e11d48" />
-                  </div>
-                  <div>
-                    <div className="lms-exam-title">Practice Tests &amp; Board Exams</div>
-                    <div className="lms-exam-sub">Tap to view published quizzes &amp; upcoming exams</div>
-                  </div>
-                </div>
-                <ChevronRight size={18} color="#64748b" />
-              </button>
-            )}
-          </section>
+            </section>
+          )}
 
           {/* 6. Quick Access Row */}
           <section className="lms-section" style={{ marginBottom: 4 }}>

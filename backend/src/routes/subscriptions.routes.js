@@ -1,4 +1,10 @@
 import { Router } from 'express';
+import { z } from 'zod';
+import { validate } from '../middleware/validate.js';
+
+const selectPlanSchema = z.object({
+  planCode: z.string().trim().min(3).max(64),
+});
 
 export function createSubscriptionRoutes({ subscriptionService, paymentService, requireAuth }) {
   const router = Router();
@@ -20,6 +26,23 @@ export function createSubscriptionRoutes({ subscriptionService, paymentService, 
       next(err);
     }
   });
+
+  router.post(
+    '/select-plan',
+    requireAuth,
+    validate({ body: selectPlanSchema }),
+    async (req, res, next) => {
+      try {
+        const result = await subscriptionService.selectPendingPlan({
+          userId: req.user.id,
+          planCode: req.body.planCode,
+        });
+        res.json({ success: true, data: result });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 
   return router;
 }

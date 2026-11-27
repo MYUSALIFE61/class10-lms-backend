@@ -3,12 +3,43 @@ import { apiRequest } from './apiClient.js';
 import { getDeviceMetadata, requestPlayIntegrityToken } from './nativeBridge.js';
 
 export const lmsApi = {
-  async register({ email, password, fullName, phone, board }) {
+  async checkUsername(username) {
+    return apiRequest(`/auth/check-username?username=${encodeURIComponent(username)}`, {
+      auth: false,
+    });
+  },
+
+  async register({
+    email,
+    password,
+    confirmPassword,
+    fullName,
+    username,
+    phone,
+    state,
+    district,
+    schoolName,
+    className,
+    board,
+  }) {
     const device = await getDeviceMetadata(APP_CONFIG.appVersion);
     return apiRequest('/auth/register', {
       method: 'POST',
       auth: false,
-      body: { email, password, fullName, phone: phone || undefined, board, device },
+      body: {
+        email,
+        password,
+        ...(confirmPassword !== undefined ? { confirmPassword } : {}),
+        fullName,
+        ...(username ? { username } : {}),
+        phone: phone || undefined,
+        ...(state ? { state } : {}),
+        ...(district !== undefined ? { district } : {}),
+        ...(schoolName !== undefined ? { schoolName } : {}),
+        ...(className ? { className } : {}),
+        board,
+        device,
+      },
     });
   },
 
@@ -49,6 +80,13 @@ export const lmsApi = {
     return apiRequest('/subscriptions/plans');
   },
 
+  async selectPendingPlan(planCode) {
+    return apiRequest('/subscriptions/select-plan', {
+      method: 'POST',
+      body: { planCode },
+    });
+  },
+
   async createPaymentOrder(planCode) {
     return apiRequest('/payments/create-order', {
       method: 'POST',
@@ -60,6 +98,32 @@ export const lmsApi = {
     return apiRequest('/payments/verify', {
       method: 'POST',
       body: { razorpayOrderId, razorpayPaymentId, razorpaySignature },
+    });
+  },
+
+  async recordPaymentFailure(payload) {
+    return apiRequest('/payments/failure', {
+      method: 'POST',
+      body: payload,
+    });
+  },
+
+  async getPaymentOrderStatus(orderId) {
+    return apiRequest(`/payments/orders/${encodeURIComponent(orderId)}/status`);
+  },
+
+  async getPaymentHistory() {
+    return apiRequest('/payments/history');
+  },
+
+  async simulateDevRazorpayOutcome({ orderId, outcome, method }) {
+    if (!APP_CONFIG.isDevelopment) {
+      throw new Error('Local Razorpay simulator is strictly restricted to development mode.');
+    }
+    return apiRequest('/dev-razorpay/simulate', {
+      method: 'POST',
+      auth: false,
+      body: { orderId, outcome, method },
     });
   },
 
@@ -197,6 +261,26 @@ export const lmsApi = {
     return apiRequest('/student/progress');
   },
 
+  async getStudentRecentLessons(limit = 8) {
+    return apiRequest(`/student/recent-lessons?limit=${encodeURIComponent(limit)}`);
+  },
+
+  async getLessonNotesTab(lessonId) {
+    return apiRequest(`/student/lessons/${encodeURIComponent(lessonId)}/notes`);
+  },
+
+  async getLessonConceptsTab(lessonId) {
+    return apiRequest(`/student/lessons/${encodeURIComponent(lessonId)}/concepts`);
+  },
+
+  async getLessonRevisionTab(lessonId) {
+    return apiRequest(`/student/lessons/${encodeURIComponent(lessonId)}/revision`);
+  },
+
+  async getLessonPyqsTab(lessonId) {
+    return apiRequest(`/student/lessons/${encodeURIComponent(lessonId)}/pyqs`);
+  },
+
   async getStudentNotifications() {
     return apiRequest('/student/notifications');
   },
@@ -278,6 +362,10 @@ export const lmsApi = {
 
   async listMyDownloads() {
     return apiRequest('/downloads');
+  },
+
+  async refreshOfflineLease() {
+    return apiRequest('/downloads/lease/refresh', { method: 'POST', body: {} });
   },
 
   async deleteMyDownload(downloadId) {

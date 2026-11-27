@@ -9,6 +9,7 @@
  */
 import crypto from 'node:crypto';
 import os from 'node:os';
+import express from 'express';
 import { createApp } from '../src/app.js';
 import { hmacSha256Hex, generateStudentCode } from '../src/utils/crypto.js';
 import {
@@ -47,7 +48,6 @@ const config = makeTestConfig({
   ALLOWED_ORIGINS: allowedOrigins.join(','),
   allowedOrigins,
   MAX_DEVICES_PER_STUDENT: 3,
-  // Local personal testing adapter (swappable to 'cloudflare_r2' before commercial launch)
   VIDEO_STORAGE_PROVIDER: process.env.VIDEO_STORAGE_PROVIDER || 'pikpak_local',
   PIKPAK_CLI_PATH: process.env.PIKPAK_CLI_PATH || '',
   STREAM_TOKEN_TTL_SECONDS: 900,
@@ -459,7 +459,9 @@ function seedClass10PreviewCatalog() {
 }
 
 async function seedPreviewAccounts() {
-  const plan = await store.getPlanByCode('CLASS10_ANNUAL_499');
+  const plan =
+    (await store.getPlanByCode('CLASS10_ANNUAL_799')) ||
+    (await store.getPlanByCode('CLASS10_ANNUAL_499'));
 
   // 1. Paid Active Subscriber (AP Board)
   const paidUser = await authProvider.signUp({
@@ -535,6 +537,7 @@ async function seedPreviewAccounts() {
 seedClass10PreviewCatalog();
 await seedPreviewAccounts();
 
+const devGatewayPayments = new Map();
 const paymentGateway = {
   async createOrder({ amountPaise, currency }) {
     return {
@@ -542,6 +545,13 @@ const paymentGateway = {
       amount: amountPaise,
       currency,
     };
+  },
+  async fetchPayment(paymentId) {
+    return devGatewayPayments.get(paymentId) || null;
+  },
+  async fetchOrderPayments(orderId) {
+    const items = [...devGatewayPayments.values()].filter((p) => p.order_id === orderId);
+    return { items };
   },
 };
 
@@ -563,6 +573,75 @@ const { app, services } = createApp({
   paymentGateway,
   integrityProvider,
   disableRateLimit: false,
+});
+
+// Strict local-dev-only Razorpay Test Mode simulator wrapper BEFORE Express 404 handler
+// (NEVER exists in production src/app.js; uses server-side test secret to mint signed test outcomes)
+const previewApp = express();
+previewApp.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  next();
+});
+previewApp.post('/api/v1/dev-razorpay/simulate', express.json(), async (req, res, next) => {
+  try {
+    const { orderId, outcome = 'captured', method = 'upi' } = req.body || {};
+    const tx = await store.getPaymentByOrderId(orderId);
+    if (!tx) {
+      return res.status(404).json({ success: false, error: { message: 'Order not found' } });
+    }
+    const paymentId = `pay_dev_${crypto.randomBytes(6).toString('hex')}`;
+    if (outcome === 'failed') {
+      devGatewayPayments.set(paymentId, {
+        id: paymentId,
+        order_id: orderId,
+        amount: tx.amount_paise,
+        currency: tx.currency,
+        method,
+        status: 'failed',
+        error_code: 'BAD_REQUEST_ERROR',
+        error_description: 'Simulated Razorpay Test Mode payment failure (Card/UPI declined).',
+        error_reason: 'payment_failed',
+      });
+      return res.json({
+        success: true,
+        data: {
+          outcome: 'failed',
+          razorpayOrderId: orderId,
+          razorpayPaymentId: paymentId,
+          method,
+          errorCode: 'BAD_REQUEST_ERROR',
+          errorDescription: 'Simulated Razorpay Test Mode payment failure (Card/UPI declined).',
+        },
+      });
+    }
+
+    const gatewayStatus = outcome === 'pending' ? 'authorized' : 'captured';
+    devGatewayPayments.set(paymentId, {
+      id: paymentId,
+      order_id: orderId,
+      amount: tx.amount_paise,
+      currency: tx.currency,
+      method,
+      status: gatewayStatus,
+    });
+    const signature = hmacSha256Hex(config.RAZORPAY_KEY_SECRET, `${orderId}|${paymentId}`);
+    return res.json({
+      success: true,
+      data: {
+        outcome,
+        razorpayOrderId: orderId,
+        razorpayPaymentId: paymentId,
+        razorpaySignature: signature,
+        method,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Seed initial DB-backed Topics, Study Resources, Question Bank, Practice Quiz & Upcoming Exam
@@ -863,6 +942,130 @@ async function seedDynamicCmsData() {
 
 await seedDynamicCmsData();
 
+// Seed Phase 4 local-preview-only lesson learning tabs (Concepts, Revision, Handwritten Notes, Teacher Info)
+function seedPhase4PreviewLearningData() {
+  const allLessons = [...store.lessons.values()];
+  const firstLesson = allLessons[0];
+  if (!firstLesson) return;
+
+  firstLesson.lesson_number = 1;
+  firstLesson.teacher_name = 'Prof. S. Venkata Rao (M.Sc., B.Ed.)';
+  firstLesson.learning_objectives =
+    'Understand Euclid’s Division Lemma (a = bq + r, 0 ≤ r < b) and apply Euclid’s Division Algorithm to compute HCF of any two positive integers.';
+
+  const c1 = crypto.randomUUID();
+  store.lessonConcepts.set(c1, {
+    id: c1,
+    subject_id: firstLesson.subject_id,
+    chapter_id: firstLesson.chapter_id,
+    lesson_id: firstLesson.id,
+    title: "Euclid's Division Lemma",
+    explanation_markdown:
+      'For any two positive integers a and b, there exist unique whole numbers q (quotient) and r (remainder) satisfying the division relation below.',
+    formula_expression: 'a = bq + r,   where 0 ≤ r < b',
+    examples_json: [
+      'Take a = 25, b = 4 → 25 = 4(6) + 1 (here q = 6, r = 1 and 0 ≤ 1 < 4).',
+      'Find HCF(135, 225): 225 = 135(1) + 90 → 135 = 90(1) + 45 → 90 = 45(2) + 0 ⇒ HCF = 45.',
+    ],
+    definitions_json: [
+      'Lemma: A proven statement used as a stepping stone for proving another theorem.',
+      'Algorithm: A well-defined series of steps that gives a procedure for solving a type of problem.',
+    ],
+    display_order: 1,
+    is_premium: false,
+    is_active: true,
+  });
+
+  const c2 = crypto.randomUUID();
+  store.lessonConcepts.set(c2, {
+    id: c2,
+    subject_id: firstLesson.subject_id,
+    chapter_id: firstLesson.chapter_id,
+    lesson_id: firstLesson.id,
+    title: 'Step-by-Step HCF Computation',
+    explanation_markdown:
+      'Apply Euclid’s lemma repeatedly by replacing (a, b) with (b, r) until remainder r equals 0. The divisor at that final step is the Highest Common Factor.',
+    formula_expression: 'HCF(a, b) = HCF(b, r)   until r = 0',
+    examples_json: ['HCF(867, 255): 867 = 255(3) + 102 → 255 = 102(2) + 51 → 102 = 51(2) + 0 ⇒ HCF = 51.'],
+    definitions_json: ['Co-prime integers: Two integers whose HCF equals 1.'],
+    display_order: 2,
+    is_premium: false,
+    is_active: true,
+  });
+
+  const revSeed = [
+    {
+      point_type: 'formula',
+      title: 'Core Division Identity',
+      content_markdown: 'Always verify that remainder r is non-negative and strictly less than divisor b.',
+      formula_expression: 'a = bq + r  (0 ≤ r < b)',
+    },
+    {
+      point_type: 'key_point',
+      title: 'Stopping Condition for HCF',
+      content_markdown: 'Stop dividing the moment remainder r = 0; the divisor b in that final step is the HCF.',
+      formula_expression: '',
+    },
+    {
+      point_type: 'definition',
+      title: 'Euclid Division Algorithm',
+      content_markdown: 'A systematic technique to compute the Highest Common Factor (HCF) of two given positive integers.',
+      formula_expression: '',
+    },
+    {
+      point_type: 'checklist',
+      title: 'Can I write a = bq + r cleanly for any two positive integers?',
+      content_markdown: 'Practice at least 3 textbook exercise problems without looking at solutions.',
+      formula_expression: '',
+    },
+    {
+      point_type: 'checklist',
+      title: 'Can I find HCF(900, 270) in 3 clean steps?',
+      content_markdown: 'Check that your final divisor gives remainder 0.',
+      formula_expression: '',
+    },
+  ];
+  revSeed.forEach((item, idx) => {
+    const id = crypto.randomUUID();
+    store.lessonRevisionPoints.set(id, {
+      id,
+      subject_id: firstLesson.subject_id,
+      chapter_id: firstLesson.chapter_id,
+      lesson_id: firstLesson.id,
+      ...item,
+      display_order: idx + 1,
+      is_premium: false,
+      is_active: true,
+    });
+  });
+
+  // Attach an existing chapter note & sample practice question strictly to firstLesson for preview UI
+  const noteId = crypto.randomUUID();
+  store.notes.set(noteId, {
+    id: noteId,
+    subject_id: firstLesson.subject_id,
+    chapter_id: firstLesson.chapter_id,
+    lesson_id: firstLesson.id,
+    title: "Handwritten Classroom Notes — Euclid's Division Lemma",
+    content_markdown:
+      "## 1.1 Euclid's Division Lemma\n\nTheorem: Given positive integers a and b, there exist unique integers q and r satisfying:\n  a = bq + r,  0 ≤ r < b\n\n### Solved Board Example\nFind HCF of 900 and 270 using Euclid's Division Algorithm:\nStep 1: 900 = 270 × 3 + 90  (r = 90 ≠ 0)\nStep 2: 270 = 90 × 3 + 0    (r = 0)\nTherefore, HCF(900, 270) = 90.\n\n### Exam Tip\nAlways write the condition 0 ≤ r < b clearly for full marks.",
+    is_premium: false,
+    display_order: 1,
+    is_active: true,
+  });
+
+  // Link existing Real Numbers PYQ to firstLesson for preview tab verification
+  for (const pyq of store.pyqs.values()) {
+    if (pyq.chapter_id === firstLesson.chapter_id && !pyq.lesson_id) {
+      pyq.lesson_id = firstLesson.id;
+      pyq.question_type = 'numerical';
+      pyq.explanation = 'Apply a = bq + r repeatedly until remainder becomes 0.';
+    }
+  }
+}
+
+seedPhase4PreviewLearningData();
+
 // Automatically sync videos uploaded in your locally authenticated PikPak account on boot
 try {
   const syncResult = await services.videoSyncService.syncVideos({ defaultPremium: false });
@@ -876,10 +1079,11 @@ try {
   console.warn(`[VIDEO SYNC] Initial auto-sync skipped (${err.message}). Tap "Sync Videos" in Dashboard once logged in.`);
 }
 
-app.listen(PORT, () => {
+previewApp.use(app);
+previewApp.listen(PORT, () => {
   console.log(`[LOCAL DEV PREVIEW SERVER] Running at http://localhost:${PORT}/api/v1`);
   console.log('  Admin Portal Login:     admin@class10lms.in / Admin@1234');
   console.log('  Sample Paid Student:    paid@ap10.in     / Password1234');
   console.log('  Sample Expired Student: expired@ts10.in  / Password1234');
-  console.log('  Video Provider Mode:   ', config.VIDEO_STORAGE_PROVIDER, '(swappable to cloudflare_r2 for production)');
+  console.log('  Video Provider Mode:   ', config.VIDEO_STORAGE_PROVIDER, '(local server storage + Android private vault only)');
 });

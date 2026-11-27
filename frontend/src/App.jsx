@@ -5,12 +5,18 @@ import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { NetworkProvider } from './context/NetworkContext.jsx';
 import { SplashPage } from './pages/SplashPage.jsx';
+import { WelcomePage } from './pages/WelcomePage.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
+import { SignupPage } from './pages/SignupPage.jsx';
+import { LegalPage } from './pages/LegalPage.jsx';
 import { DashboardPage } from './pages/DashboardPage.jsx';
 import { CoursesPage } from './pages/CoursesPage.jsx';
 import { QuizPage } from './pages/QuizPage.jsx';
 import { ProgressPage } from './pages/ProgressPage.jsx';
 import { SubscriptionPage } from './pages/SubscriptionPage.jsx';
+import { CheckoutPage } from './pages/CheckoutPage.jsx';
+import { PaymentResultPage } from './pages/PaymentResultPage.jsx';
+import { PaymentHistoryPage } from './pages/PaymentHistoryPage.jsx';
 import { SubjectDetailPage } from './pages/SubjectDetailPage.jsx';
 import { ChapterDetailPage } from './pages/ChapterDetailPage.jsx';
 import { RevisionZonePage } from './pages/RevisionZonePage.jsx';
@@ -31,10 +37,10 @@ function AndroidHardwareBackBridge() {
       const notCancelled = window.dispatchEvent(fullscreenExitEvent);
       if (!notCancelled) return;
 
-      const rootPaths = ['/dashboard', '/login'];
+      const rootPaths = ['/dashboard', '/login', '/', '/welcome', '/subscription', '/renewal'];
       if (!rootPaths.includes(location.pathname) && canGoBack) {
         navigate(-1);
-      } else if (location.pathname !== '/dashboard' && location.pathname !== '/login') {
+      } else if (!rootPaths.includes(location.pathname)) {
         navigate('/dashboard', { replace: true });
       } else {
         CapApp.exitApp();
@@ -51,6 +57,12 @@ function AndroidHardwareBackBridge() {
   return null;
 }
 
+export function resolveAuthenticatedHome(subscription) {
+  if (subscription?.isActive) return '/dashboard';
+  if (subscription?.status === 'expired') return '/renewal';
+  return '/subscription';
+}
+
 function ProtectedRoute({ children }) {
   const { status } = useAuth();
   if (status === 'loading') return <SplashPage />;
@@ -58,11 +70,30 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
-function PublicOnlyRoute({ children }) {
-  const { status } = useAuth();
+function SubscriptionRequiredRoute({ children }) {
+  const { status, subscription } = useAuth();
   if (status === 'loading') return <SplashPage />;
-  if (status === 'authenticated') return <Navigate to="/dashboard" replace />;
+  if (status !== 'authenticated') return <Navigate to="/login" replace />;
+  if (!subscription?.isActive) {
+    return <Navigate to={resolveAuthenticatedHome(subscription)} replace />;
+  }
   return children;
+}
+
+function PublicOnlyRoute({ children }) {
+  const { status, subscription } = useAuth();
+  if (status === 'loading') return <SplashPage />;
+  if (status === 'authenticated') {
+    return <Navigate to={resolveAuthenticatedHome(subscription)} replace />;
+  }
+  return children;
+}
+
+function SmartFallbackRoute() {
+  const { status, subscription } = useAuth();
+  if (status === 'loading') return <SplashPage />;
+  if (status !== 'authenticated') return <Navigate to="/" replace />;
+  return <Navigate to={resolveAuthenticatedHome(subscription)} replace />;
 }
 
 export function AppRoutes() {
@@ -70,6 +101,22 @@ export function AppRoutes() {
     <>
       <AndroidHardwareBackBridge />
       <Routes>
+        <Route
+          path="/"
+          element={
+            <PublicOnlyRoute>
+              <WelcomePage />
+            </PublicOnlyRoute>
+          }
+        />
+        <Route
+          path="/welcome"
+          element={
+            <PublicOnlyRoute>
+              <WelcomePage />
+            </PublicOnlyRoute>
+          }
+        />
         <Route
           path="/login"
           element={
@@ -79,35 +126,53 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/signup"
+          element={
+            <PublicOnlyRoute>
+              <SignupPage />
+            </PublicOnlyRoute>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <PublicOnlyRoute>
+              <SignupPage />
+            </PublicOnlyRoute>
+          }
+        />
+        <Route path="/terms" element={<LegalPage type="terms" />} />
+        <Route path="/privacy" element={<LegalPage type="privacy" />} />
+        <Route
           path="/dashboard"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <DashboardPage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/courses"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <CoursesPage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/exams"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <QuizPage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/progress"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <ProgressPage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
@@ -119,43 +184,99 @@ export function AppRoutes() {
           }
         />
         <Route
-          path="/subjects/:subjectId"
+          path="/renewal"
           element={
             <ProtectedRoute>
-              <SubjectDetailPage />
+              <SubscriptionPage isRenewal />
             </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/checkout"
+          element={
+            <ProtectedRoute>
+              <CheckoutPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/checkout/:planCode"
+          element={
+            <ProtectedRoute>
+              <CheckoutPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/payment/success"
+          element={
+            <ProtectedRoute>
+              <PaymentResultPage resultStatus="success" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/payment/failure"
+          element={
+            <ProtectedRoute>
+              <PaymentResultPage resultStatus="failure" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/payment/pending"
+          element={
+            <ProtectedRoute>
+              <PaymentResultPage resultStatus="pending" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/payments/history"
+          element={
+            <ProtectedRoute>
+              <PaymentHistoryPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/subjects/:subjectId"
+          element={
+            <SubscriptionRequiredRoute>
+              <SubjectDetailPage />
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/subjects/:subjectId/chapters/:chapterId"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <ChapterDetailPage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/revision"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <RevisionZonePage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/lessons/:lessonId"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <LessonPlayerPage />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
           path="/downloads"
           element={
-            <ProtectedRoute>
+            <SubscriptionRequiredRoute>
               <MyDownloadsScreen />
-            </ProtectedRoute>
+            </SubscriptionRequiredRoute>
           }
         />
         <Route
@@ -166,7 +287,7 @@ export function AppRoutes() {
             </ProtectedRoute>
           }
         />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<SmartFallbackRoute />} />
       </Routes>
     </>
   );

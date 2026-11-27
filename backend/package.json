@@ -29,6 +29,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.6.0",
     "supertest": "^7.0.0",
     "vitest": "^3.0.7"
   }

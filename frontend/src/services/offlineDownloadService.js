@@ -9,19 +9,23 @@ import {
   getNativeOfflineStorageStats,
   isNativeAndroid,
   listNativeOfflineDownloads,
+  pauseNativeOfflineDownload,
   startNativeOfflineDownload,
+  updateNativeOfflineLease,
   updateNativeOfflineProgress,
 } from './nativeBridge.js';
 
 export const DOWNLOAD_STATES = {
   NOT_DOWNLOADED: 'NOT_DOWNLOADED',
   DOWNLOADING: 'DOWNLOADING',
+  PAUSED: 'PAUSED',
   DOWNLOADED: 'DOWNLOADED',
   DOWNLOAD_FAILED: 'DOWNLOAD_FAILED',
   FILE_MISSING: 'FILE_MISSING',
 };
 
 const WEB_META_PREFIX = 'c10_offline_meta_v1_';
+const WEB_LEASE_PREFIX = 'c10_offline_lease_v1_';
 const WEB_PENDING_SYNC_KEY = 'c10_offline_pending_sync_v1';
 
 // In-memory store for browser/test binary blobs (never exposes public URLs; cleared on logout)
@@ -415,6 +419,9 @@ export const offlineDownloadService = {
           durationSeconds: Number(manifest.lesson?.durationSeconds || 0),
           watermarkText,
           qualityLabel: manifest.qualityLabel || '720p',
+          offlineLeaseToken: manifest.offlineLease?.token || '',
+          offlineLeaseExpiresAtEpochMs: Number(manifest.offlineLease?.expiresAtEpochMs || 0),
+          subscriptionExpiresAtEpochMs: Number(manifest.offlineLease?.subscriptionExpiresAtEpochMs || 0),
         });
 
         if (nativeRes?.alreadyDownloaded && nativeRes?.record) {
@@ -443,7 +450,7 @@ export const offlineDownloadService = {
           errorCode: err?.code || 'NATIVE_DOWNLOAD_FAILED',
           errorMessage: err?.message || 'Download failed to start on this device.',
         });
-        lmsApi.syncDownloadStatus(downloadId, { status: 'failed' }).catch(() => {});
+        lmsApi.syncDownloadStatus(downloadId, { status: 'failed' }).catch(() => { });
         return failed;
       }
     }
@@ -501,7 +508,7 @@ export const offlineDownloadService = {
         (expectedSha256 && computedHash && computedHash !== expectedSha256)
       ) {
         const msg = 'Downloaded video failed SHA-256 integrity verification. Please retry download.';
-        await lmsApi.syncDownloadStatus(downloadId, { status: 'failed' }).catch(() => {});
+        await lmsApi.syncDownloadStatus(downloadId, { status: 'failed' }).catch(() => { });
         return setLiveState(studentId, lessonId, {
           downloadId,
           status: DOWNLOAD_STATES.DOWNLOAD_FAILED,
@@ -535,11 +542,22 @@ export const offlineDownloadService = {
         downloadedAtEpochMs: Date.now(),
         watermarkText,
         qualityLabel: manifest.qualityLabel || '720p',
+        offlineLeaseExpiresAtEpochMs: Number(manifest.offlineLease?.expiresAtEpochMs || 0),
       };
 
       const metaMap = readWebMetaMap(studentId);
       metaMap[lessonId] = metaRecord;
       writeWebMetaMap(studentId, metaMap);
+      if (manifest.offlineLease?.token && manifest.offlineLease?.expiresAtEpochMs) {
+        try {
+          window.localStorage.setItem(
+            `${WEB_LEASE_PREFIX}${studentId}`,
+            JSON.stringify(manifest.offlineLease)
+          );
+        } catch {
+          // ignore
+        }
+      }
 
       const syncPayload = {
         status: 'completed',
@@ -565,7 +583,7 @@ export const offlineDownloadService = {
       });
     } catch (err) {
       if (err?.name === 'AbortError') {
-        await lmsApi.syncDownloadStatus(downloadId, { status: 'cancelled' }).catch(() => {});
+        await lmsApi.syncDownloadStatus(downloadId, { status: 'cancelled' }).catch(() => { });
         return setLiveState(studentId, lessonId, {
           downloadId,
           status: DOWNLOAD_STATES.NOT_DOWNLOADED,
@@ -577,7 +595,7 @@ export const offlineDownloadService = {
         });
       }
 
-      await lmsApi.syncDownloadStatus(downloadId, { status: 'failed' }).catch(() => {});
+      await lmsApi.syncDownloadStatus(downloadId, { status: 'failed' }).catch(() => { });
       return setLiveState(studentId, lessonId, {
         downloadId,
         status: DOWNLOAD_STATES.DOWNLOAD_FAILED,
@@ -608,7 +626,7 @@ export const offlineDownloadService = {
     }
 
     if (downloadId) {
-      lmsApi.syncDownloadStatus(downloadId, { status: 'cancelled' }).catch(() => {});
+      lmsApi.syncDownloadStatus(downloadId, { status: 'cancelled' }).catch(() => { });
     }
 
     return setLiveState(studentId, lessonId, {
@@ -619,6 +637,109 @@ export const offlineDownloadService = {
       errorMessage: '',
       record: null,
     });
+  },
+
+  async pauseDownload({ studentId, lessonId, downloadId = '' }) {
+    const k = keyFor(studentId, lessonId);
+    const prev = liveStateMap.get(k);
+    if (isNativeAndroid()) {
+      await pauseNativeOfflineDownload({ studentId, lessonId });
+    } else {
+      const controller = webAbortControllers.get(k);
+      if (controller) {
+        controller.abort();
+        webAbortControllers.delete(k);
+      }
+    }
+    return setLiveState(studentId, lessonId, {
+      downloadId: downloadId || prev?.downloadId || '',
+      status: DOWNLOAD_STATES.PAUSED,
+      percent: prev?.percent || 0,
+      bytesDownloaded: prev?.bytesDownloaded || 0,
+      totalBytes: prev?.totalBytes || 0,
+      errorCode: '',
+      errorMessage: '',
+    });
+  },
+
+  async expireLocalOfflineLease({ studentId }) {
+    if (!studentId) return;
+    if (isNativeAndroid()) {
+      await updateNativeOfflineLease({
+        studentId,
+        leaseToken: 'revoked',
+        leaseExpiresAtEpochMs: 1,
+        subscriptionExpiresAtEpochMs: 1,
+      }).catch(() => {});
+    } else {
+      try {
+        window.localStorage.setItem(
+          `${WEB_LEASE_PREFIX}${studentId}`,
+          JSON.stringify({ token: 'revoked', expiresAtEpochMs: 1, subscriptionExpiresAtEpochMs: 1 })
+        );
+      } catch {
+        // ignore
+      }
+    }
+  },
+
+  async refreshOfflineLease({ studentId }) {
+    if (!studentId || typeof lmsApi.refreshOfflineLease !== 'function') return null;
+    try {
+      const res = await lmsApi.refreshOfflineLease();
+      const lease = res?.offlineLease || null;
+      if (!lease?.token || !lease?.expiresAtEpochMs) return null;
+      if (isNativeAndroid()) {
+        await updateNativeOfflineLease({
+          studentId,
+          leaseToken: lease.token,
+          leaseExpiresAtEpochMs: Number(lease.expiresAtEpochMs),
+          subscriptionExpiresAtEpochMs: Number(lease.subscriptionExpiresAtEpochMs || 0),
+        }).catch(() => {});
+      } else {
+        try {
+          window.localStorage.setItem(`${WEB_LEASE_PREFIX}${studentId}`, JSON.stringify(lease));
+        } catch {
+          // ignore
+        }
+      }
+      return lease;
+    } catch (err) {
+      const code = String(err?.code || '');
+      if (
+        err?.status === 403 &&
+        (code.startsWith('SUBSCRIPTION_') || code === 'PAYMENT_UNVERIFIED' || code === 'DEVICE_REVOKED')
+      ) {
+        await this.expireLocalOfflineLease({ studentId });
+      }
+      return null;
+    }
+  },
+
+  isOfflineLeaseValid({ studentId, lessonId, nowMs = Date.now() }) {
+    if (!studentId) return { valid: false, reason: 'Please sign in to watch downloaded lessons.' };
+    if (isNativeAndroid()) {
+      // Native Kotlin LmsMedia3PlayerActivity enforces Keystore-backed lease & clock rollback directly
+      return { valid: true, reason: '' };
+    }
+    let studentExp = 0;
+    try {
+      const raw = window.localStorage.getItem(`${WEB_LEASE_PREFIX}${studentId}`);
+      if (raw) studentExp = Number(JSON.parse(raw)?.expiresAtEpochMs || 0);
+    } catch {
+      studentExp = 0;
+    }
+    const metaMap = readWebMetaMap(studentId);
+    const recExp = Number(metaMap?.[lessonId]?.offlineLeaseExpiresAtEpochMs || 0);
+    const effectiveExp = studentExp > 0 ? studentExp : recExp;
+    if (effectiveExp > 0 && nowMs > effectiveExp) {
+      return {
+        valid: false,
+        reason:
+          'Your offline viewing license has expired. Connect to the internet to verify your Class 10 subscription and renew offline access.',
+      };
+    }
+    return { valid: true, reason: '' };
   },
 
   async listVerifiedDownloads({ studentId }) {
@@ -693,7 +814,7 @@ export const offlineDownloadService = {
         lessonId,
         lastPositionMs: posMs,
         completed: Boolean(markCompleted),
-      }).catch(() => {});
+      }).catch(() => { });
     } else if (studentId) {
       const metaMap = readWebMetaMap(studentId);
       if (metaMap[lessonId]) {

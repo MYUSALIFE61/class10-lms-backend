@@ -17,6 +17,15 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "Class10MediaPlayer")
 class Class10MediaPlayerPlugin : Plugin() {
 
+    private fun readLongArg(call: PluginCall, key: String, defaultValue: Long = 0L): Long {
+        val raw = call.data?.opt(key) ?: return defaultValue
+        return when (raw) {
+            is Number -> raw.toLong()
+            is String -> raw.toLongOrNull() ?: defaultValue
+            else -> defaultValue
+        }
+    }
+
     @PluginMethod
     fun playVideo(call: PluginCall) {
         val url = call.getString("url").orEmpty().trim()
@@ -29,7 +38,7 @@ class Class10MediaPlayerPlugin : Plugin() {
         val description = call.getString("description") ?: ""
         val notesText = call.getString("notesText") ?: ""
         val watermarkText = call.getString("watermarkText") ?: "Class 10 SSC LMS"
-        val startPositionMs = call.getLong("startPositionMs") ?: 0L
+        val startPositionMs = readLongArg(call, "startPositionMs", 0L)
         val completed = call.getBoolean("completed") ?: false
 
         val lessonId = call.getString("lessonId") ?: ""
@@ -89,7 +98,7 @@ class Class10MediaPlayerPlugin : Plugin() {
         val description = call.getString("description") ?: ""
         val notesText = call.getString("notesText") ?: ""
         val watermarkText = call.getString("watermarkText") ?: verified.watermarkText.ifBlank { "Class 10 SSC LMS" }
-        val startPositionMs = call.getLong("startPositionMs") ?: verified.lastPositionMs
+        val startPositionMs = readLongArg(call, "startPositionMs", verified.lastPositionMs)
         val completed = call.getBoolean("completed") ?: verified.completed
         val apiBaseUrl = call.getString("apiBaseUrl") ?: ""
         val accessToken = call.getString("accessToken") ?: ""

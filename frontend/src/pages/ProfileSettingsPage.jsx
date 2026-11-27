@@ -135,9 +135,17 @@ export function ProfileSettingsPage() {
           <h2 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 800, color: 'var(--text)' }}>
             {user?.fullName || 'Class 10 Student'}
           </h2>
-          <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 2, marginBottom: 10 }}>
-            Class 10 Student &bull; {user?.board || 'AP'} SSC ({user?.studentCode || ''})
+          <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginTop: 2, marginBottom: 4 }}>
+            {user?.className || 'Class 10'} &bull; {user?.board || 'AP'} SSC ({user?.studentCode || ''})
           </div>
+          {(user?.username || user?.schoolName) && (
+            <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginBottom: 10 }}>
+              {user?.username ? `@${user.username}` : ''}
+              {user?.username && user?.schoolName ? ' • ' : ''}
+              {user?.schoolName || ''}
+              {user?.district ? ` (${user.district}, ${user.state || ''})` : ''}
+            </div>
+          )}
           <button
             type="button"
             className="btn btn-primary"
@@ -283,6 +291,13 @@ export function ProfileSettingsPage() {
         <button type="button" className="profile-menu-row" onClick={() => navigate('/subscription')}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
             <Crown size={19} color="#f59e0b" /> Class 10 Subscription Plan
+          </span>
+          <ChevronRight size={17} color="#64748b" />
+        </button>
+
+        <button type="button" className="profile-menu-row" onClick={() => navigate('/payments/history')}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+            <FileBarChart2 size={19} color="#10b981" /> Payment Transaction History
           </span>
           <ChevronRight size={17} color="#64748b" />
         </button>

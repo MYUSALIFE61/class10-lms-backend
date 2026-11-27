@@ -1,6 +1,10 @@
 package `in`.class10lms.ssc
 
+import android.app.Dialog
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
 import android.os.Message
@@ -12,7 +16,9 @@ import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -29,10 +35,35 @@ class MainActivity : BridgeActivity() {
 
     private var customFullscreenView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+    private var payment3dsDialog: Dialog? = null
     private lateinit var screenProtectionManager: ScreenCaptureProtectionManager
 
     private fun enforceSecureWindow() {
         window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    private fun launchExternalUpiApp(rawUrl: String) {
+        try {
+            val intent = if (rawUrl.startsWith("intent://", ignoreCase = true)) {
+                Intent.parseUri(rawUrl, Intent.URI_INTENT_SCHEME).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    component = null
+                    selector = null
+                }
+            } else {
+                Intent(Intent.ACTION_VIEW, Uri.parse(rawUrl))
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(
+                this,
+                "No UPI app found on this device. Please choose UPI ID or Card inside Razorpay Checkout.",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (err: Exception) {
+            Log.w(TAG, "Unable to launch UPI app: ${err.message}")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,10 +126,12 @@ class MainActivity : BridgeActivity() {
                 request: WebResourceRequest
             ): Boolean {
                 val urlStr = request.url?.toString()
+                val inCheckout = LmsNavigationPolicy.isCheckoutContext(view.url, lmsHost)
                 val decision = LmsNavigationPolicy.evaluateNavigation(
                     rawUrl = urlStr,
                     isForMainFrame = request.isForMainFrame,
-                    lmsHost = lmsHost
+                    lmsHost = lmsHost,
+                    inPaymentCheckout = inCheckout
                 )
 
                 if (!decision.allow) {
@@ -110,7 +143,12 @@ class MainActivity : BridgeActivity() {
                     return true
                 }
 
-                // Allow Capacitor plugins/router to inspect internal LMS URLs; load allowed embed subframes directly
+                if (decision.isExternalPaymentApp && !urlStr.isNullOrBlank()) {
+                    launchExternalUpiApp(urlStr)
+                    return true
+                }
+
+                // Allow Capacitor plugins/router to inspect internal LMS URLs; load allowed embed/payment subframes directly
                 return if (decision.isInternalLms) {
                     super.shouldOverrideUrlLoading(view, request)
                 } else {
@@ -120,13 +158,19 @@ class MainActivity : BridgeActivity() {
 
             @Deprecated("Deprecated in Android API 24+")
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                val inCheckout = LmsNavigationPolicy.isCheckoutContext(view.url, lmsHost)
                 val decision = LmsNavigationPolicy.evaluateNavigation(
                     rawUrl = url,
                     isForMainFrame = true,
-                    lmsHost = lmsHost
+                    lmsHost = lmsHost,
+                    inPaymentCheckout = inCheckout
                 )
                 if (!decision.allow) {
                     Log.i(TAG, "Blocked legacy navigation [${decision.reason}]")
+                    return true
+                }
+                if (decision.isExternalPaymentApp) {
+                    launchExternalUpiApp(url)
                     return true
                 }
                 return if (decision.isInternalLms) {
@@ -157,6 +201,73 @@ class MainActivity : BridgeActivity() {
                 isUserGesture: Boolean,
                 resultMsg: Message?
             ): Boolean {
+                // Allow 3D-Secure / Bank ACS verification popups ONLY while student is inside active LMS Checkout
+                if (LmsNavigationPolicy.isCheckoutContext(view?.url, lmsHost) && resultMsg != null) {
+                    val popupWebView = WebView(this@MainActivity).apply {
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            allowFileAccess = false
+                            setSupportMultipleWindows(false)
+                        }
+                    }
+
+                    val dialog = Dialog(this@MainActivity, android.R.style.Theme_DeviceDefault_Light_NoActionBar_Fullscreen)
+                    dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    dialog.setContentView(popupWebView)
+                    dialog.setOnDismissListener {
+                        popupWebView.destroy()
+                        payment3dsDialog = null
+                    }
+
+                    popupWebView.webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            popupView: WebView,
+                            req: WebResourceRequest
+                        ): Boolean {
+                            val popupUrl = req.url?.toString()
+                            val decision = LmsNavigationPolicy.evaluatePaymentPopupNavigation(popupUrl)
+                            if (!decision.allow) {
+                                Log.w(TAG, "Blocked unsafe 3DS popup navigation [${decision.reason}]")
+                                return true
+                            }
+                            if (decision.isExternalPaymentApp && !popupUrl.isNullOrBlank()) {
+                                launchExternalUpiApp(popupUrl)
+                                return true
+                            }
+                            return false
+                        }
+
+                        override fun onReceivedSslError(
+                            popupView: WebView?,
+                            handler: SslErrorHandler?,
+                            error: SslError?
+                        ) {
+                            handler?.cancel()
+                            dialog.dismiss()
+                        }
+                    }
+
+                    popupWebView.webChromeClient = object : WebChromeClient() {
+                        override fun onCloseWindow(window: WebView?) {
+                            dialog.dismiss()
+                        }
+                    }
+
+                    payment3dsDialog?.dismiss()
+                    payment3dsDialog = dialog
+                    dialog.show()
+
+                    val transport = resultMsg.obj as? WebView.WebViewTransport
+                    if (transport != null) {
+                        transport.webView = popupWebView
+                        resultMsg.sendToTarget()
+                        return true
+                    }
+                    dialog.dismiss()
+                    return false
+                }
+
                 // Prevents target="_blank" (e.g., YouTube bottom-right branding link) and window.open()
                 // from opening external browsers, YouTube app, or stray WebView popups.
                 val hitExtra = view?.hitTestResult?.extra

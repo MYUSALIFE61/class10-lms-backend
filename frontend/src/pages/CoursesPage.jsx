@@ -10,7 +10,6 @@ import {
   Star,
   FileText,
   X,
-  FolderTree,
 } from 'lucide-react';
 import { AppLayout } from '../components/common/AppLayout.jsx';
 import { EmptyState, ErrorState, LoadingSkeleton } from '../components/common/StateViews.jsx';
@@ -62,7 +61,6 @@ export function CoursesPage() {
   const [error, setError] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [query, setQuery] = useState('');
-  const [showGuide, setShowGuide] = useState(false);
 
   const loadCourses = async () => {
     setLoading(true);
@@ -172,9 +170,20 @@ export function CoursesPage() {
                   </div>
                   <div className="courses-tile-title">{subject.title}</div>
                   <div className="courses-tile-meta">
-                    {typeof subject.chapterCount === 'number'
-                      ? `${subject.chapterCount} ${subject.chapterCount === 1 ? 'Chapter' : 'Chapters'}`
-                      : 'Class 10 SSC'}
+                    {subject.chapterCount ?? 0} {subject.chapterCount === 1 ? 'Chapter' : 'Chapters'} &bull;{' '}
+                    {subject.lessonCount ?? 0} {subject.lessonCount === 1 ? 'Lesson' : 'Lessons'}
+                  </div>
+                  <div className="courses-tile-progress-wrap">
+                    <div className="progress-bar-track" style={{ height: 6 }}>
+                      <div
+                        className="progress-bar-fill"
+                        style={{
+                          width: `${subject.progressPercent ?? 0}%`,
+                          background: subject.accentColor || '#1152d4',
+                        }}
+                      />
+                    </div>
+                    <span className="courses-tile-pct">{subject.progressPercent ?? 0}%</span>
                   </div>
                 </button>
               );
@@ -227,54 +236,6 @@ export function CoursesPage() {
             </button>
           </div>
         )}
-
-        {/* Collapsible Auto-Sync Folder & Naming Convention Reference */}
-        <div className="card" style={{ padding: '12px 16px' }}>
-          <button
-            type="button"
-            onClick={() => setShowGuide((v) => !v)}
-            style={{
-              width: '100%',
-              border: 'none',
-              background: 'transparent',
-              padding: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontWeight: 700,
-              fontSize: '0.84rem',
-              color: 'var(--primary)',
-              cursor: 'pointer',
-            }}
-          >
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <FolderTree size={16} /> Video Folder &amp; Naming Auto-Sync Format
-            </span>
-            <span>{showGuide ? 'Hide' : 'View'}</span>
-          </button>
-
-          {showGuide && (
-            <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
-              <div>Upload into PikPak (or R2) using either structure, then tap <strong>Sync Videos</strong> on Home:</div>
-              <pre
-                style={{
-                  background: '#0f172a',
-                  color: '#e2e8f0',
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  overflowX: 'auto',
-                  fontSize: '0.74rem',
-                  margin: '8px 0 4px',
-                }}
-              >{`Class_10/01_Mathematics/Ch01_Real_Numbers/01_Introduction.mp4
-Class_10/02_Physical_Science/Ch02_Chemical_Equations/02_Concepts.mp4
-Class_10/08_Revision_Series/05_Revision.mp4
-
-Or filename format:
-Class10_Maths_Ch01_01_Introduction.mp4`}</pre>
-            </div>
-          )}
-        </div>
       </div>
     </AppLayout>
   );

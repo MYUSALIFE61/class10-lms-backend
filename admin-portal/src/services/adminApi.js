@@ -157,29 +157,53 @@ export const adminApi = {
   registerLessonOfflineAsset: (lessonId, data) =>
     req(`/lessons/${lessonId}/offline-assets`, { method: 'POST', body: data }),
   deleteLessonOfflineAsset: (assetId) => req(`/offline-assets/${assetId}`, { method: 'DELETE' }),
-  uploadLessonOfflineMp4: async (lessonId, { file, qualityLabel = '720p', targetHeight = '' }) => {
-    const token = getAdminToken();
-    const qs = toQuery({
-      fileName: file?.name || 'lesson.mp4',
-      qualityLabel,
-      targetHeight: targetHeight || undefined,
-    });
-    const res = await fetch(`${API_BASE}/lessons/${lessonId}/offline-assets/upload${qs}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'video/mp4',
-        'X-File-Name': file?.name || 'lesson.mp4',
-        'X-Quality-Label': qualityLabel,
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: file,
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = new Error(json?.error?.message || `Upload failed (${res.status})`);
-      err.code = json?.error?.code || 'UPLOAD_ERROR';
-      throw err;
-    }
-    return json.data;
-  },
+  uploadLessonOfflineMp4: (lessonId, { file, qualityLabel = '720p', targetHeight = '', onProgress = null }) =>
+    new Promise((resolve, reject) => {
+      const token = getAdminToken();
+      const qs = toQuery({
+        fileName: file?.name || 'lesson.mp4',
+        qualityLabel,
+        targetHeight: targetHeight || undefined,
+      });
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/lessons/${lessonId}/offline-assets/upload${qs}`);
+      xhr.setRequestHeader('Content-Type', 'video/mp4');
+      xhr.setRequestHeader('X-File-Name', file?.name || 'lesson.mp4');
+      xhr.setRequestHeader('X-Quality-Label', qualityLabel);
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable && typeof onProgress === 'function') {
+          const percent = Math.min(99, Math.round((evt.loaded / evt.total) * 100));
+          onProgress({ percent, loaded: evt.loaded, total: evt.total });
+        }
+      };
+
+      xhr.onload = () => {
+        let json = {};
+        try {
+          json = JSON.parse(xhr.responseText || '{}');
+        } catch {
+          json = {};
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (typeof onProgress === 'function') {
+            onProgress({ percent: 100, loaded: file?.size || 0, total: file?.size || 0 });
+          }
+          resolve(json.data);
+        } else {
+          const err = new Error(json?.error?.message || `Upload failed (${xhr.status})`);
+          err.code = json?.error?.code || 'UPLOAD_ERROR';
+          reject(err);
+        }
+      };
+
+      xhr.onerror = () => {
+        const err = new Error('Network error while uploading MP4. Please retry.');
+        err.code = 'NETWORK_ERROR';
+        reject(err);
+      };
+
+      xhr.send(file);
+    }),
 };

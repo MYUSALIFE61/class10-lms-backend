@@ -24,6 +24,7 @@ const envSchema = z.object({
   MAX_DEVICES_PER_STUDENT: z.coerce.number().int().min(1).max(5).default(1),
   CONCURRENT_SESSION_WINDOW_MINUTES: z.coerce.number().int().min(1).max(120).default(10),
 
+  RAZORPAY_MODE: z.enum(['test', 'live']).default('test'),
   RAZORPAY_KEY_ID: z.string().min(8, 'RAZORPAY_KEY_ID is required'),
   RAZORPAY_KEY_SECRET: z.string().min(8, 'RAZORPAY_KEY_SECRET is required'),
   RAZORPAY_WEBHOOK_SECRET: z.string().min(8, 'RAZORPAY_WEBHOOK_SECRET is required'),
@@ -38,32 +39,29 @@ const envSchema = z.object({
   PRIVATE_STREAM_TOKEN_KEY: z.string().optional().default(''),
   PRIVATE_STREAM_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(14400).default(1800),
 
-  // Swappable Own-Player Video Storage Provider:
-  // - 'pikpak_local': local personal testing adapter ONLY (not for commercial launch)
-  // - 'cloudflare_r2': recommended commercial production adapter ($0 egress)
-  VIDEO_STORAGE_PROVIDER: z.enum(['none', 'pikpak_local', 'cloudflare_r2']).default('none'),
+  // Own-Player Video Storage Provider (server-local/self-hosted only; third-party cloud object storage prohibited):
+  // - 'none': disabled
+  // - 'pikpak_local': local personal testing adapter ONLY
+  VIDEO_STORAGE_PROVIDER: z.enum(['none', 'pikpak_local']).default('none'),
   PIKPAK_CLI_PATH: z.string().optional().default(''),
   PUBLIC_API_BASE_URL: z.string().optional().default(''),
-  R2_CUSTOM_DOMAIN: z.string().optional().default(''),
-  R2_SIGNING_SECRET: z.string().optional().default(''),
   STREAM_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(7200).default(900),
 
-  // Authorized Offline Video Download Module (Phase 12)
-  // - 'persistent_disk': attached persistent volume / VPS private directory (zero extra subscription)
-  // - 'cloudflare_r2': recommended commercial production private R2 bucket ($0 egress)
-  // - 'supabase_storage': existing Supabase private bucket (suitable for small pilots)
-  // - 'pikpak_local': local development/testing adapter ONLY
+  // Authorized Offline Video Source & Local Android Vault Policy:
+  // Server source MUST remain private local disk (no R2 / S3 / Supabase Storage / Firebase Storage);
+  // Student downloads live exclusively in Android `context.noBackupFilesDir/offline_lessons/`.
   OFFLINE_VIDEO_STORAGE_PROVIDER: z
-    .enum(['persistent_disk', 'cloudflare_r2', 'supabase_storage', 'pikpak_local'])
+    .enum(['persistent_disk', 'pikpak_local'])
     .default('persistent_disk'),
   OFFLINE_VIDEO_STORAGE_DIR: z.string().optional().default(''),
   OFFLINE_VIDEO_TEMP_DIR: z.string().optional().default(''),
+  RESOURCES_UPLOAD_DIR: z.string().optional().default(''),
   OFFLINE_DOWNLOAD_TOKEN_TTL_SECONDS: z.coerce.number().int().min(120).max(14400).default(1800),
+  OFFLINE_LEASE_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   OFFLINE_MAX_UPLOAD_MB: z.coerce.number().int().min(10).max(4096).default(1024),
   OFFLINE_RETENTION_POLICY: z
     .enum(['wipe_on_logout', 'keep_encrypted_bound_to_student'])
     .default('wipe_on_logout'),
-  SUPABASE_OFFLINE_BUCKET: z.string().optional().default('lesson-offline-videos'),
   FFMPEG_PATH: z.string().optional().default(''),
   FFPROBE_PATH: z.string().optional().default(''),
 });

@@ -16,6 +16,8 @@ export function VideoLibraryPage() {
   const [offlineFile, setOfflineFile] = useState(null);
   const [offlineQuality, setOfflineQuality] = useState('720p');
   const [uploadingOffline, setUploadingOffline] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [uploadError, setUploadError] = useState('');
   const [msg, setMsg] = useState('');
 
   const load = async () => {
@@ -74,6 +76,8 @@ export function VideoLibraryPage() {
     setOfflineTarget(video);
     setOfflineFile(null);
     setOfflineQuality('720p');
+    setUploadProgress(null);
+    setUploadError('');
     try {
       const res = await adminApi.listLessonOfflineAssets(video.lessonId);
       setOfflineAssets(res.items || []);
@@ -83,14 +87,30 @@ export function VideoLibraryPage() {
   };
 
   const handleUploadOfflineMp4 = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     if (!offlineTarget || !offlineFile) return;
+
+    const maxBytes = 1024 * 1024 * 1024;
+    const isMp4 =
+      offlineFile.type === 'video/mp4' || String(offlineFile.name || '').toLowerCase().endsWith('.mp4');
+    if (!isMp4) {
+      setUploadError('Only valid MP4 video files (.mp4, video/mp4) are accepted for private offline storage.');
+      return;
+    }
+    if (offlineFile.size <= 0 || offlineFile.size > maxBytes) {
+      setUploadError('MP4 file size must be between 1 byte and 1024 MB.');
+      return;
+    }
+
     setUploadingOffline(true);
+    setUploadError('');
+    setUploadProgress({ percent: 0, loaded: 0, total: offlineFile.size });
     setMsg('');
     try {
       const res = await adminApi.uploadLessonOfflineMp4(offlineTarget.lessonId, {
         file: offlineFile,
         qualityLabel: offlineQuality,
+        onProgress: (p) => setUploadProgress(p),
       });
       setMsg(
         `Authorized offline MP4 uploaded for "${offlineTarget.displayTitle}" (SHA-256: ${String(
@@ -100,8 +120,9 @@ export function VideoLibraryPage() {
       const listRes = await adminApi.listLessonOfflineAssets(offlineTarget.lessonId);
       setOfflineAssets(listRes.items || []);
       setOfflineFile(null);
+      setUploadProgress(null);
     } catch (err) {
-      setMsg(`Offline MP4 upload failed: ${err.message}`);
+      setUploadError(err.message || 'Offline MP4 upload failed.');
     } finally {
       setUploadingOffline(false);
     }
@@ -336,10 +357,40 @@ export function VideoLibraryPage() {
                 <option value="original">Original</option>
               </select>
             </div>
+            {uploadProgress && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-semibold text-[#155EEF]">
+                  <span>Uploading & Computing SHA-256…</span>
+                  <span>
+                    {uploadProgress.percent}% ({(uploadProgress.loaded / (1024 * 1024)).toFixed(1)} /{' '}
+                    {(uploadProgress.total / (1024 * 1024)).toFixed(1)} MB)
+                  </span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-blue-100 overflow-hidden">
+                  <div
+                    className="h-full bg-[#155EEF] transition-all"
+                    style={{ width: `${uploadProgress.percent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {uploadError && (
+              <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-xs text-red-700 flex items-center justify-between gap-2">
+                <span>{uploadError}</span>
+                <button
+                  type="button"
+                  onClick={handleUploadOfflineMp4}
+                  disabled={uploadingOffline || !offlineFile}
+                  className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-bold shrink-0"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setOfflineTarget(null)} className="btn-secondary">Close</button>
               <button type="submit" disabled={uploadingOffline || !offlineFile} className="btn-primary">
-                {uploadingOffline ? 'Uploading & Hashing...' : 'Upload Authorized MP4'}
+                {uploadingOffline ? `Uploading ${uploadProgress?.percent ?? 0}%...` : 'Upload Authorized MP4'}
               </button>
             </div>
           </form>

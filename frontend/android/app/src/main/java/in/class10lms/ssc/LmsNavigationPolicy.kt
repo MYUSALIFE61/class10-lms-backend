@@ -18,7 +18,8 @@ object LmsNavigationPolicy {
     data class NavigationDecision(
         val allow: Boolean,
         val isInternalLms: Boolean,
-        val reason: String
+        val reason: String,
+        val isExternalPaymentApp: Boolean = false
     )
 
     private val YOUTUBE_PRIMARY_HOSTS = setOf(
@@ -38,7 +39,25 @@ object LmsNavigationPolicy {
     )
 
     private val PAYMENT_SUBFRAME_HOSTS = setOf(
-        "razorpay.com"
+        "razorpay.com",
+        "razorpay.in"
+    )
+
+    private val UPI_PAYMENT_SCHEMES = setOf(
+        "upi",
+        "phonepe",
+        "tez",
+        "paytmmp",
+        "bhim",
+        "credpay",
+        "amazonpay"
+    )
+
+    private val CHECKOUT_PATH_PREFIXES = listOf(
+        "/checkout",
+        "/subscription",
+        "/renewal",
+        "/payment/"
     )
 
     private val BLOCKED_YOUTUBE_PATH_PREFIXES = listOf(
@@ -66,7 +85,6 @@ object LmsNavigationPolicy {
     )
 
     private val BLOCKED_EXTERNAL_SCHEMES = setOf(
-        "intent",
         "market",
         "vnd.youtube",
         "youtube",
@@ -77,17 +95,67 @@ object LmsNavigationPolicy {
         "file",
         "content",
         "javascript",
-        "ftp",
-        "upi",
-        "phonepe",
-        "tez",
-        "paytmmp"
+        "ftp"
     )
+
+    fun isCheckoutContext(currentUrl: String?, lmsHost: String): Boolean {
+        if (currentUrl.isNullOrBlank()) return false
+        val uri = try {
+            URI(currentUrl.trim())
+        } catch (_: Exception) {
+            return false
+        }
+        val scheme = uri.scheme?.lowercase(Locale.US) ?: ""
+        val host = uri.host?.lowercase(Locale.US)?.trimEnd('.') ?: ""
+        val path = uri.rawPath?.lowercase(Locale.US) ?: ""
+        val normalizedLmsHost = lmsHost.lowercase(Locale.US).trimEnd('.')
+        val isLocalhost = host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2"
+        if (host == normalizedLmsHost && (scheme == "https" || isLocalhost)) {
+            return CHECKOUT_PATH_PREFIXES.any { path == it || path.startsWith("$it/") || path.startsWith(it) }
+        }
+        return scheme == "https" && matchesAnyDomain(host, PAYMENT_SUBFRAME_HOSTS)
+    }
+
+    fun evaluatePaymentPopupNavigation(rawUrl: String?): NavigationDecision {
+        if (rawUrl.isNullOrBlank()) {
+            return NavigationDecision(false, false, "empty_popup_url")
+        }
+        val uri = try {
+            URI(rawUrl.trim())
+        } catch (_: Exception) {
+            return NavigationDecision(false, false, "malformed_popup_uri")
+        }
+        val scheme = uri.scheme?.lowercase(Locale.US) ?: ""
+        if (scheme == "about" && rawUrl.equals("about:blank", ignoreCase = true)) {
+            return NavigationDecision(true, false, "popup_about_blank")
+        }
+        if (scheme in UPI_PAYMENT_SCHEMES) {
+            return NavigationDecision(true, false, "allowed_popup_upi_intent", isExternalPaymentApp = true)
+        }
+        if (scheme == "intent") {
+            return evaluateIntentUriForPayment(rawUrl)
+        }
+        if (scheme != "https") {
+            return NavigationDecision(false, false, "blocked_popup_non_https:$scheme")
+        }
+        val host = uri.host?.lowercase(Locale.US)?.trimEnd('.') ?: ""
+        if (host.isEmpty()) {
+            return NavigationDecision(false, false, "popup_missing_host")
+        }
+        if (matchesAnyDomain(host, YOUTUBE_PRIMARY_HOSTS) ||
+            matchesAnyDomain(host, YOUTUBE_SHORT_HOSTS) ||
+            matchesAnyDomain(host, YOUTUBE_MEDIA_SUBFRAME_HOSTS)
+        ) {
+            return NavigationDecision(false, false, "blocked_popup_youtube_domain")
+        }
+        return NavigationDecision(true, false, "allowed_payment_3ds_popup")
+    }
 
     fun evaluateNavigation(
         rawUrl: String?,
         isForMainFrame: Boolean,
-        lmsHost: String
+        lmsHost: String,
+        inPaymentCheckout: Boolean = false
     ): NavigationDecision {
         if (rawUrl.isNullOrBlank()) {
             return NavigationDecision(false, false, "empty_url")
@@ -110,6 +178,24 @@ object LmsNavigationPolicy {
                 NavigationDecision(true, false, "subframe_about_blank")
             } else {
                 NavigationDecision(false, false, "blocked_about_scheme")
+            }
+        }
+
+        // Scoped UPI deep links ONLY while inside active LMS payment checkout
+        if (scheme in UPI_PAYMENT_SCHEMES) {
+            return if (inPaymentCheckout) {
+                NavigationDecision(true, false, "allowed_upi_payment_intent", isExternalPaymentApp = true)
+            } else {
+                NavigationDecision(false, false, "blocked_upi_outside_checkout:$scheme")
+            }
+        }
+
+        // Scoped intent:// URI handling ONLY for UPI schemes during active checkout
+        if (scheme == "intent") {
+            return if (inPaymentCheckout) {
+                evaluateIntentUriForPayment(rawUrl)
+            } else {
+                NavigationDecision(false, false, "blocked_scheme:intent")
             }
         }
 
@@ -165,7 +251,7 @@ object LmsNavigationPolicy {
             }
         }
 
-        // 5. Preserve existing Razorpay Checkout iframe inside LMS subscription screen (subframe only)
+        // 5. Razorpay Checkout iframe & 3D-Secure Bank ACS subframes inside LMS checkout (subframe only)
         if (matchesAnyDomain(host, PAYMENT_SUBFRAME_HOSTS)) {
             return if (!isForMainFrame) {
                 NavigationDecision(true, false, "allowed_payment_subframe")
@@ -174,8 +260,26 @@ object LmsNavigationPolicy {
             }
         }
 
+        if (inPaymentCheckout && !isForMainFrame) {
+            return NavigationDecision(true, false, "allowed_payment_3ds_subframe")
+        }
+
         // 6. Block all other external website navigations to keep students inside the LMS
         return NavigationDecision(false, false, "blocked_external_host:$host")
+    }
+
+    private fun evaluateIntentUriForPayment(rawUrl: String): NavigationDecision {
+        val lower = rawUrl.lowercase(Locale.US)
+        if (lower.contains("youtube") || lower.contains("market://")) {
+            return NavigationDecision(false, false, "blocked_non_payment_intent")
+        }
+        val schemeMatch = Regex("intent;.*?scheme=([a-z0-9.+\\-]+)").find(lower)
+        val innerScheme = schemeMatch?.groupValues?.getOrNull(1) ?: ""
+        return if (innerScheme in UPI_PAYMENT_SCHEMES) {
+            NavigationDecision(true, false, "allowed_upi_android_intent", isExternalPaymentApp = true)
+        } else {
+            NavigationDecision(false, false, "blocked_intent_non_upi_scheme:$innerScheme")
+        }
     }
 
     internal fun matchesAnyDomain(host: String, allowedDomains: Set<String>): Boolean {

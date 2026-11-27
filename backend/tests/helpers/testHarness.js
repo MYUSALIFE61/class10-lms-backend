@@ -19,6 +19,7 @@ export function makeTestConfig(overrides = {}) {
     SUBSCRIPTION_PLAN_CODE: 'CLASS10_ANNUAL_499',
     MAX_DEVICES_PER_STUDENT: 1,
     CONCURRENT_SESSION_WINDOW_MINUTES: 10,
+    RAZORPAY_MODE: 'test',
     RAZORPAY_KEY_ID: 'rzp_test_1234567890',
     RAZORPAY_KEY_SECRET: 'rzp_test_secret_9876543210',
     RAZORPAY_WEBHOOK_SECRET: 'rzp_webhook_secret_abcdef1234',
@@ -30,8 +31,6 @@ export function makeTestConfig(overrides = {}) {
     VIDEO_STORAGE_PROVIDER: 'none',
     PIKPAK_CLI_PATH: '',
     PUBLIC_API_BASE_URL: '',
-    R2_CUSTOM_DOMAIN: '',
-    R2_SIGNING_SECRET: '',
     STREAM_TOKEN_TTL_SECONDS: 900,
     ...overrides,
   };
@@ -82,24 +81,111 @@ export class InMemoryDataStore {
     this.notes = new Map();
     this.pyqs = new Map();
     this.formulas = new Map();
+    this.lessonConcepts = new Map();
+    this.lessonRevisionPoints = new Map();
     this.progress = new Map();
     this.playbackLogs = [];
 
-    const planId = crypto.randomUUID();
-    this.plans.set(planId, {
-      id: planId,
-      code: 'CLASS10_ANNUAL_499',
-      name: 'Class 10 Complete AP & TS SSC Pass',
-      description: 'Annual Class 10 subscription',
-      price_paise: 49900,
-      currency: 'INR',
-      duration_days: 365,
-      is_active: true,
-    });
+    const seedPlans = [
+      {
+        id: crypto.randomUUID(),
+        code: 'CLASS10_MONTHLY_200',
+        name: 'Monthly Plan',
+        description:
+          'Flexible 30-day full access to Class 10 AP & Telangana SSC video lessons, chapter tests, notes & encrypted offline downloads.',
+        price_paise: 20000,
+        currency: 'INR',
+        duration_days: 30,
+        duration_label: '1 Month',
+        features_json: [
+          'All 6 Class 10 SSC Subjects',
+          'Topic-wise Video Lessons & Offline Downloads',
+          'Chapter MCQs, Notes, PYQs & Formula Sheets',
+          '30 Days Full Validity',
+        ],
+        display_order: 1,
+        is_recommended: false,
+        is_active: true,
+      },
+      {
+        id: crypto.randomUUID(),
+        code: 'CLASS10_HALFYEAR_500',
+        name: 'Half-Yearly Plan',
+        description:
+          'Best for term & pre-final board preparation with 180 days of uninterrupted Class 10 AP & TS SSC learning.',
+        price_paise: 50000,
+        currency: 'INR',
+        duration_days: 180,
+        duration_label: '6 Months',
+        features_json: [
+          'All 6 Class 10 SSC Subjects',
+          'Topic-wise Video Lessons & Offline Downloads',
+          'Pre-Final & SA Revision Tests + PYQs',
+          '180 Days Validity (Save ₹700 vs Monthly)',
+        ],
+        display_order: 2,
+        is_recommended: false,
+        is_active: true,
+      },
+      {
+        id: crypto.randomUUID(),
+        code: 'CLASS10_ANNUAL_799',
+        name: 'Annual Plan',
+        description:
+          'Complete 365-day Class 10 AP & TS SSC Board Master Pass covering full syllabus, board mock tests, notes & offline library.',
+        price_paise: 79900,
+        currency: 'INR',
+        duration_days: 365,
+        duration_label: '12 Months',
+        features_json: [
+          'All 6 Class 10 SSC Subjects',
+          'Unlimited Encrypted Offline Lesson Downloads',
+          'Board Exam PYQs, Notes & Gamified Video Quizzes',
+          'Full 365 Days Academic Year Validity',
+        ],
+        display_order: 3,
+        is_recommended: true,
+        is_active: true,
+      },
+      {
+        // Legacy plan preserved inactive for historical FKs & backward-compatible config override tests
+        id: crypto.randomUUID(),
+        code: 'CLASS10_ANNUAL_499',
+        name: 'Class 10 Complete AP & TS SSC Pass',
+        description: 'Legacy annual Class 10 subscription',
+        price_paise: 49900,
+        currency: 'INR',
+        duration_days: 365,
+        duration_label: '12 Months',
+        features_json: [],
+        display_order: 99,
+        is_recommended: false,
+        is_active: false,
+      },
+    ];
+    for (const p of seedPlans) {
+      this.plans.set(p.id, p);
+    }
   }
 
   async getProfileById(id) {
     return this.profiles.get(id) || null;
+  }
+
+  async getProfileByUsername(username) {
+    if (!username) return null;
+    const normalized = String(username).trim().toLowerCase();
+    return (
+      [...this.profiles.values()].find(
+        (p) => p.username && String(p.username).trim().toLowerCase() === normalized
+      ) || null
+    );
+  }
+
+  async getProfileByPhone(phone) {
+    if (!phone) return null;
+    const normalized = String(phone).trim();
+    return [...this.profiles.values()].find((p) => p.phone === normalized) || null;
   }
 
   async createProfile(profile) {
@@ -197,19 +283,36 @@ export class InMemoryDataStore {
     this.securityEvents.push({ id: crypto.randomUUID(), created_at: new Date().toISOString(), ...event });
   }
 
-  async getPlanByCode(code) {
-    return [...this.plans.values()].find((p) => p.code === code && p.is_active) || null;
+  async getPlanById(planId) {
+    return this.plans.get(planId) || null;
+  }
+
+  async getPlanByCode(code, { activeOnly = false } = {}) {
+    return (
+      [...this.plans.values()].find(
+        (p) => p.code === code && (!activeOnly || p.is_active)
+      ) || null
+    );
   }
 
   async listActivePlans() {
-    return [...this.plans.values()].filter((p) => p.is_active);
+    return [...this.plans.values()]
+      .filter((p) => p.is_active)
+      .sort(
+        (a, b) => (a.display_order ?? 10) - (b.display_order ?? 10) || a.price_paise - b.price_paise
+      );
   }
 
   async getLatestSubscription(userId) {
     const rows = [...this.subscriptions.values()]
       .filter((s) => s.user_id === userId)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    return rows[0] || null;
+    const latest = rows[0] || null;
+    if (!latest) return null;
+    return {
+      ...latest,
+      subscription_plans: latest.plan_id ? this.plans.get(latest.plan_id) || null : null,
+    };
   }
 
   async getActiveSubscription(userId) {
@@ -256,6 +359,27 @@ export class InMemoryDataStore {
     const row = { ...this.payments.get(id), ...patch, updated_at: new Date().toISOString() };
     this.payments.set(id, row);
     return row;
+  }
+
+  async getPaymentByWebhookEventId(eventId) {
+    if (!eventId) return null;
+    return (
+      [...this.payments.values()].find(
+        (p) =>
+          p.webhook_event_id === eventId ||
+          p.raw_webhook_payload?.processedEventIds?.includes(eventId)
+      ) || null
+    );
+  }
+
+  async listPaymentsByUser(userId) {
+    return [...this.payments.values()]
+      .filter((p) => p.user_id === userId)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .map((p) => ({
+        ...p,
+        subscription_plans: p.plan_id ? this.plans.get(p.plan_id) || null : null,
+      }));
   }
 
   async listSubjects({ board } = {}) {
@@ -383,7 +507,7 @@ export class InMemoryDataStore {
   }
 
   async listSyncedVideoLessons() {
-    const syncedProviders = new Set(['pikpak_local', 'cloudflare_r2', 'private_stream']);
+    const syncedProviders = new Set(['pikpak_local', 'private_stream', 'private_asset_stream']);
     const out = [];
     for (const [lessonId, src] of this.videoSources.entries()) {
       if (!syncedProviders.has(src.provider)) continue;
@@ -449,6 +573,29 @@ export class InMemoryDataStore {
       .sort((a, b) => a.display_order - b.display_order);
     const start = (page - 1) * limit;
     return { items: all.slice(start, start + limit), total: all.length };
+  }
+
+  async listLessonConcepts({ lessonId }) {
+    return [...this.lessonConcepts.values()]
+      .filter((c) => c.is_active !== false && c.lesson_id === lessonId)
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+  }
+
+  async listLessonRevisionPoints({ lessonId }) {
+    return [...this.lessonRevisionPoints.values()]
+      .filter((r) => r.is_active !== false && r.lesson_id === lessonId)
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
+  }
+
+  async listLessonPyqs({ lessonId, board }) {
+    return [...this.pyqs.values()]
+      .filter(
+        (p) =>
+          p.is_active !== false &&
+          p.lesson_id === lessonId &&
+          (!board || p.board === board || p.board === 'BOTH')
+      )
+      .sort((a, b) => (a.display_order || 0) - (b.display_order || 0) || (b.exam_year || 0) - (a.exam_year || 0));
   }
 
   async getLessonProgress(userId, lessonId) {

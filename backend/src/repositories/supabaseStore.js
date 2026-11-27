@@ -26,6 +26,30 @@ export class SupabaseDataStore {
     return data;
   }
 
+  async getProfileByUsername(username) {
+    if (!username) return null;
+    const normalized = String(username).trim().toLowerCase();
+    const { data, error } = await this.db
+      .from('profiles')
+      .select('*')
+      .eq('username', normalized)
+      .maybeSingle();
+    throwIfError(error, 'getProfileByUsername');
+    return data;
+  }
+
+  async getProfileByPhone(phone) {
+    if (!phone) return null;
+    const normalized = String(phone).trim();
+    const { data, error } = await this.db
+      .from('profiles')
+      .select('*')
+      .eq('phone', normalized)
+      .maybeSingle();
+    throwIfError(error, 'getProfileByPhone');
+    return data;
+  }
+
   async createProfile(profile) {
     const { data, error } = await this.db
       .from('profiles')
@@ -184,13 +208,25 @@ export class SupabaseDataStore {
   }
 
   // ---- Subscription Plans & Subscriptions ----
-  async getPlanByCode(code) {
+  async getPlanById(planId) {
     const { data, error } = await this.db
       .from('subscription_plans')
       .select('*')
-      .eq('code', code)
-      .eq('is_active', true)
+      .eq('id', planId)
       .maybeSingle();
+    throwIfError(error, 'getPlanById');
+    return data;
+  }
+
+  async getPlanByCode(code, { activeOnly = false } = {}) {
+    let query = this.db
+      .from('subscription_plans')
+      .select('*')
+      .eq('code', code);
+    if (activeOnly) {
+      query = query.eq('is_active', true);
+    }
+    const { data, error } = await query.maybeSingle();
     throwIfError(error, 'getPlanByCode');
     return data;
   }
@@ -202,7 +238,9 @@ export class SupabaseDataStore {
       .eq('is_active', true)
       .order('price_paise', { ascending: true });
     throwIfError(error, 'listActivePlans');
-    return data || [];
+    return (data || []).sort(
+      (a, b) => (a.display_order ?? 10) - (b.display_order ?? 10) || a.price_paise - b.price_paise
+    );
   }
 
   async getLatestSubscription(userId) {
@@ -292,6 +330,28 @@ export class SupabaseDataStore {
       .single();
     throwIfError(error, 'updatePaymentTransaction');
     return data;
+  }
+
+  async getPaymentByWebhookEventId(eventId) {
+    if (!eventId) return null;
+    const { data, error } = await this.db
+      .from('payment_transactions')
+      .select('*')
+      .eq('webhook_event_id', eventId)
+      .maybeSingle();
+    throwIfError(error, 'getPaymentByWebhookEventId');
+    return data;
+  }
+
+  async listPaymentsByUser(userId) {
+    const { data, error } = await this.db
+      .from('payment_transactions')
+      .select('*, subscription_plans(code, name, duration_days)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    throwIfError(error, 'listPaymentsByUser');
+    return data || [];
   }
 
   // ---- Curriculum ----
@@ -438,7 +498,7 @@ export class SupabaseDataStore {
     const { data: sources, error: sErr } = await this.db
       .from('lesson_video_sources')
       .select('lesson_id, provider, file_name')
-      .in('provider', ['pikpak_local', 'cloudflare_r2', 'private_stream']);
+      .in('provider', ['pikpak_local', 'private_stream', 'private_asset_stream']);
     throwIfError(sErr, 'listSyncedVideoLessons.sources');
     if (!sources || sources.length === 0) return [];
 
@@ -456,7 +516,7 @@ export class SupabaseDataStore {
       const src = sourceById.get(l.id);
       return {
         ...l,
-        source_provider: src?.provider || 'cloudflare_r2',
+        source_provider: src?.provider || 'private_asset_stream',
         source_file_name: src?.file_name || l.title,
       };
     });
@@ -497,6 +557,53 @@ export class SupabaseDataStore {
     const { data, error, count } = await query.range(from, to);
     throwIfError(error, 'listNotes');
     return { items: data || [], total: count ?? (data?.length || 0) };
+  }
+
+  async listLessonConcepts({ lessonId }) {
+    const { data, error } = await this.db
+      .from('lesson_concepts')
+      .select('*')
+      .eq('lesson_id', lessonId)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+    if (error && (error.code === '42P01' || String(error.message || '').includes('does not exist'))) {
+      return [];
+    }
+    throwIfError(error, 'listLessonConcepts');
+    return data || [];
+  }
+
+  async listLessonRevisionPoints({ lessonId }) {
+    const { data, error } = await this.db
+      .from('lesson_revision_points')
+      .select('*')
+      .eq('lesson_id', lessonId)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true });
+    if (error && (error.code === '42P01' || String(error.message || '').includes('does not exist'))) {
+      return [];
+    }
+    throwIfError(error, 'listLessonRevisionPoints');
+    return data || [];
+  }
+
+  async listLessonPyqs({ lessonId, board }) {
+    let query = this.db
+      .from('previous_exam_questions')
+      .select('*')
+      .eq('lesson_id', lessonId)
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+      .order('exam_year', { ascending: false });
+    if (board && (board === 'AP' || board === 'TS')) {
+      query = query.in('board', [board, 'BOTH']);
+    }
+    const { data, error } = await query;
+    if (error && (error.code === '42703' || String(error.message || '').includes('lesson_id'))) {
+      return [];
+    }
+    throwIfError(error, 'listLessonPyqs');
+    return data || [];
   }
 
   async listPyqs({ subjectId, chapterId, board, page = 1, limit = 30 }) {

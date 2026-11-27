@@ -146,97 +146,181 @@ export function ChapterDetailPage() {
         {loading && <LoadingSkeleton rows={4} />}
         {!loading && error && <ErrorState message={error} onRetry={loadChapterContent} />}
 
-        {/* Videos List */}
+        {/* Videos / Lessons List */}
         {!loading && !error && activeTab === 'videos' && (
           <>
             {lessons.length === 0 ? (
               <EmptyState
-                title="No Videos in This Chapter Yet"
-                description="Upload MP4 videos into this chapter folder (e.g., Ch01_Real_Numbers/01_Introduction.mp4) and tap Sync Videos on Home."
+                title="No Lessons Published in This Chapter Yet"
+                description="Published Class 10 SSC video lessons and notes for this chapter will appear here."
               />
             ) : (
               <>
-                {lessons.map((lesson, idx) => (
-                  <button
-                    key={lesson.id}
-                    type="button"
-                    className="course-card"
-                    style={{ padding: 10 }}
-                    onClick={() =>
-                      lesson.locked
-                        ? navigate('/subscription')
-                        : navigate(`/lessons/${lesson.id}`)
-                    }
-                  >
-                    {/* Vibrant Thumbnail + Play Overlay + Duration Badge */}
-                    <div
-                      style={{
-                        width: 96,
-                        height: 64,
-                        borderRadius: 12,
-                        background: THUMB_GRADIENTS[idx % THUMB_GRADIENTS.length],
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        position: 'relative',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 30,
-                          height: 30,
-                          borderRadius: '50%',
-                          background: 'rgba(15, 23, 42, 0.72)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#fff',
-                        }}
-                      >
-                        {lesson.locked ? (
-                          <Lock size={14} color="#fbbf24" />
-                        ) : lesson.progress?.isCompleted ? (
-                          <CheckCircle2 size={15} color="#34d399" />
-                        ) : (
-                          <Play size={14} fill="#ffffff" />
-                        )}
-                      </span>
-                      <span
-                        style={{
-                          position: 'absolute',
-                          right: 5,
-                          bottom: 4,
-                          background: 'rgba(2, 6, 23, 0.82)',
-                          color: '#fff',
-                          fontSize: '0.64rem',
-                          fontWeight: 700,
-                          padding: '1px 5px',
-                          borderRadius: 4,
-                        }}
-                      >
-                        {formatDurationBadge(lesson.durationSeconds, lesson.sizeLabel)}
-                      </span>
-                    </div>
+                {lessons.map((lesson, idx) => {
+                  const statusLabel =
+                    lesson.progressStatus === 'completed' || lesson.progress?.isCompleted
+                      ? 'Completed'
+                      : lesson.progressStatus === 'in_progress' || (lesson.progress?.completionPercent || 0) > 0
+                        ? `In Progress (${lesson.progress?.completionPercent || 0}%)`
+                        : 'Not Started';
+                  const statusBadgeClass =
+                    statusLabel === 'Completed'
+                      ? 'badge-emerald'
+                      : statusLabel.startsWith('In Progress')
+                        ? 'badge-blue'
+                        : 'badge-amber';
 
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text)' }}>
-                        {lesson.title}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                        <span className="badge badge-blue" style={{ fontSize: '0.66rem' }}>
-                          {lesson.videoTypeLabel || 'Concept Video'}
-                        </span>
-                        {lesson.locked && (
-                          <span className="badge badge-amber" style={{ fontSize: '0.66rem' }}>
-                            Premium
+                  return (
+                    <div key={lesson.id} className="card lesson-card-rich">
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                        {/* Thumbnail + Play Overlay + Duration Badge */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            lesson.locked ? navigate('/subscription') : navigate(`/lessons/${lesson.id}`)
+                          }
+                          aria-label={`Watch ${lesson.title}`}
+                          style={{
+                            width: 100,
+                            height: 68,
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            borderRadius: 12,
+                            background: THUMB_GRADIENTS[idx % THUMB_GRADIENTS.length],
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            position: 'relative',
+                            flexShrink: 0,
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {lesson.thumbnailUrl && (
+                            <img
+                              src={lesson.thumbnailUrl}
+                              alt=""
+                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          )}
+                          <span
+                            style={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: '50%',
+                              background: 'rgba(15, 23, 42, 0.76)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#fff',
+                              position: 'relative',
+                              zIndex: 1,
+                            }}
+                          >
+                            {lesson.locked ? (
+                              <Lock size={14} color="#fbbf24" />
+                            ) : lesson.progress?.isCompleted ? (
+                              <CheckCircle2 size={15} color="#34d399" />
+                            ) : (
+                              <Play size={14} fill="#ffffff" />
+                            )}
                           </span>
-                        )}
+                          <span
+                            style={{
+                              position: 'absolute',
+                              right: 5,
+                              bottom: 4,
+                              background: 'rgba(2, 6, 23, 0.84)',
+                              color: '#fff',
+                              fontSize: '0.64rem',
+                              fontWeight: 700,
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                              zIndex: 1,
+                            }}
+                          >
+                            {formatDurationBadge(lesson.durationSeconds, lesson.sizeLabel)}
+                          </span>
+                        </button>
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--text)' }}>
+                            Lesson {lesson.lessonNumber || idx + 1}: {lesson.title}
+                          </div>
+                          {lesson.teacherName && (
+                            <div style={{ fontSize: '0.76rem', color: '#1152d4', fontWeight: 700, marginTop: 2 }}>
+                              {lesson.teacherName}
+                            </div>
+                          )}
+                          {lesson.description && (
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                              {lesson.description}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                            <span className={`badge ${statusBadgeClass}`} style={{ fontSize: '0.66rem' }}>
+                              {statusLabel}
+                            </span>
+                            {lesson.hasNotes && (
+                              <span className="badge badge-blue" style={{ fontSize: '0.66rem' }}>
+                                Notes Available
+                              </span>
+                            )}
+                            {lesson.downloadStatus === 'completed' && (
+                              <span className="badge badge-emerald" style={{ fontSize: '0.66rem' }}>
+                                Downloaded
+                              </span>
+                            )}
+                            {lesson.downloadStatus === 'downloading' && (
+                              <span className="badge badge-blue" style={{ fontSize: '0.66rem' }}>
+                                Downloading
+                              </span>
+                            )}
+                            {lesson.downloadStatus === 'failed' && (
+                              <span className="badge badge-danger" style={{ fontSize: '0.66rem' }}>
+                                Download Failed
+                              </span>
+                            )}
+                            {lesson.locked && (
+                              <span className="badge badge-amber" style={{ fontSize: '0.66rem' }}>
+                                Premium
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="lesson-card-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ minHeight: 36, fontSize: '0.8rem', flex: 1 }}
+                          onClick={() =>
+                            lesson.locked ? navigate('/subscription') : navigate(`/lessons/${lesson.id}`)
+                          }
+                        >
+                          <Play size={14} fill="#ffffff" />
+                          <span>
+                            {statusLabel.startsWith('In Progress') ? 'Continue Learning' : 'Watch Lesson'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          style={{ minHeight: 36, fontSize: '0.8rem' }}
+                          onClick={() =>
+                            lesson.locked
+                              ? navigate('/subscription')
+                              : navigate(`/lessons/${lesson.id}?tab=notes`)
+                          }
+                        >
+                          View Notes
+                        </button>
                       </div>
                     </div>
-                    <ChevronRight size={18} color="#64748b" />
-                  </button>
-                ))}
+                  );
+                })}
 
                 {nextPlayableLesson && (
                   <button

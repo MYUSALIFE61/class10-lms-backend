@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
-import { CloudflareR2Adapter } from '../src/services/videoProviders/cloudflareR2Adapter.js';
+import { loadEnv } from '../src/config/env.js';
+import { OfflineStorageService } from '../src/services/offlineStorageService.js';
+import { createVideoProvider } from '../src/services/videoProviders/index.js';
 import { validatePikPakUpstreamUrl } from '../src/services/videoProviders/pikpakLocalAdapter.js';
 import { parseVideoOrganisation } from '../src/services/videoOrganisation.js';
 import {
@@ -137,27 +139,32 @@ describe('Phase 7: Swappable Video Sync, Student Dashboard Visibility & Own-Play
       .expect(401);
   });
 
-  it('enforces PikPak SSRF host guard and supports swappable CloudflareR2Adapter signed URLs', () => {
+  it('enforces PikPak SSRF host guard and rejects third-party cloud object storage providers', () => {
     expect(() => validatePikPakUpstreamUrl('http://dl.mypikpak.com/v.mp4')).toThrow();
     expect(() => validatePikPakUpstreamUrl('https://evil-mypikpak.com/v.mp4')).toThrow();
     expect(() => validatePikPakUpstreamUrl('https://127.0.0.1/v.mp4')).toThrow();
     expect(validatePikPakUpstreamUrl('https://dl-a10.mypikpak.com/stream?sign=abc')).toBeTruthy();
 
-    const r2 = new CloudflareR2Adapter({
-      customDomain: 'video.class10lms.in',
-      signingSecret: 'super-secret-r2-signing-key-32-chars',
-      defaultTtlSeconds: 900,
-    });
-    const signed = r2.createSignedPlaybackUrl({
-      objectKey: 'math/ch1-real-numbers.mp4',
-      userId: 'user-123',
-      deviceId: 'dev-456',
-    });
-    const parsed = new URL(signed);
-    expect(parsed.protocol).toBe('https:');
-    expect(parsed.hostname).toBe('video.class10lms.in');
-    expect(parsed.searchParams.get('sig')).toBeTruthy();
-    expect(parsed.searchParams.get('exp')).toBeTruthy();
+    expect(() => createVideoProvider({ config: { VIDEO_STORAGE_PROVIDER: 'cloudflare_r2' } })).toThrow(
+      /prohibited/i
+    );
+    expect(() =>
+      new OfflineStorageService({ config: { OFFLINE_VIDEO_STORAGE_PROVIDER: 'supabase_storage' } })
+    ).toThrow(/prohibited/i);
+    expect(() =>
+      loadEnv({
+        SUPABASE_URL: 'https://example.supabase.co',
+        SUPABASE_ANON_KEY: 'anon-key-must-be-at-least-20-chars',
+        SUPABASE_SERVICE_ROLE_KEY: 'service-key-must-be-at-least-20-chars',
+        JWT_ACCESS_SECRET: 'access-secret-must-be-at-least-32-chars',
+        JWT_REFRESH_SECRET: 'refresh-secret-must-be-at-least-32-chars',
+        DEVICE_HASH_SECRET: 'device-secret-must-be-at-least-32-chars',
+        RAZORPAY_KEY_ID: 'rzp_test_123456',
+        RAZORPAY_KEY_SECRET: 'rzp_test_secret_123456',
+        RAZORPAY_WEBHOOK_SECRET: 'rzp_webhook_secret_123',
+        OFFLINE_VIDEO_STORAGE_PROVIDER: 'cloudflare_r2',
+      })
+    ).toThrow();
   });
 
   it('auto-maps Class 10 folder hierarchy and naming convention into Subject, Chapter, Order, and Video Type', () => {

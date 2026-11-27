@@ -1,13 +1,26 @@
 import { PikPakLocalAdapter } from './pikpakLocalAdapter.js';
-import { CloudflareR2Adapter } from './cloudflareR2Adapter.js';
+
+const BLOCKED_CLOUD_PROVIDERS = new Set([
+  'cloudflare_r2',
+  'aws_s3',
+  's3',
+  'supabase_storage',
+  'firebase_storage',
+]);
 
 export function createVideoProvider({ config = {}, logger = console } = {}) {
   const mode = config.VIDEO_STORAGE_PROVIDER || 'none';
 
+  if (BLOCKED_CLOUD_PROVIDERS.has(mode)) {
+    throw new Error(
+      `Cloud object storage provider "${mode}" is prohibited. Use persistent server disk and Android local private storage (context.noBackupFilesDir/offline_lessons/).`
+    );
+  }
+
   if (mode === 'pikpak_local') {
     if (config.NODE_ENV === 'production') {
       logger.warn(
-        '[video-provider] WARNING: pikpak_local is for personal local testing ONLY. Switch VIDEO_STORAGE_PROVIDER=cloudflare_r2 for commercial production!'
+        '[video-provider] WARNING: pikpak_local is for local testing ONLY. Use private persistent server disk assets (private_asset_stream) in production.'
       );
     }
     return new PikPakLocalAdapter({
@@ -16,15 +29,7 @@ export function createVideoProvider({ config = {}, logger = console } = {}) {
     });
   }
 
-  if (mode === 'cloudflare_r2') {
-    return new CloudflareR2Adapter({
-      customDomain: config.R2_CUSTOM_DOMAIN || '',
-      signingSecret: config.R2_SIGNING_SECRET || '',
-      defaultTtlSeconds: config.STREAM_TOKEN_TTL_SECONDS || 900,
-    });
-  }
-
   return null;
 }
 
-export { PikPakLocalAdapter, CloudflareR2Adapter };
+export { PikPakLocalAdapter };

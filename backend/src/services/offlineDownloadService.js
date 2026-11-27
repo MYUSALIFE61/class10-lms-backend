@@ -105,6 +105,111 @@ export class OfflineDownloadService {
     return payload;
   }
 
+  /**
+   * Mints a server-signed, device-bound, time-limited offline playback authorization lease (Part 6).
+   * Lease expiry NEVER exceeds the student's active subscription expiry.
+   */
+  signOfflineLease({
+    studentId,
+    deviceId = '',
+    lessonId = '*',
+    subscriptionExpiresAt = null,
+    leaseDays = null,
+  }) {
+    const days = Math.max(1, Number(leaseDays || this.config.OFFLINE_LEASE_DAYS || 7));
+    const nowMs = Date.now();
+    const maxLeaseMs = nowMs + days * 24 * 60 * 60 * 1000;
+    const subExpMs = subscriptionExpiresAt ? Date.parse(subscriptionExpiresAt) : NaN;
+    const effectiveExpMs = Number.isFinite(subExpMs) ? Math.min(maxLeaseMs, subExpMs) : maxLeaseMs;
+    const expSec = Math.floor(effectiveExpMs / 1000);
+    const iatSec = Math.floor(nowMs / 1000);
+
+    const payload = {
+      typ: 'offline_lease',
+      uid: studentId,
+      dev: deviceId || '',
+      lid: lessonId || '*',
+      subExp: Number.isFinite(subExpMs) ? Math.floor(subExpMs / 1000) : null,
+      iat: iatSec,
+      exp: expSec,
+    };
+    const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const sig = crypto
+      .createHmac('sha256', this._getSigningSecret())
+      .update(encoded)
+      .digest('base64url');
+
+    return {
+      token: `${encoded}.${sig}`,
+      issuedAt: new Date(iatSec * 1000).toISOString(),
+      expiresAt: new Date(expSec * 1000).toISOString(),
+      expiresAtEpochMs: expSec * 1000,
+      subscriptionExpiresAt: Number.isFinite(subExpMs) ? new Date(subExpMs).toISOString() : null,
+      subscriptionExpiresAtEpochMs: Number.isFinite(subExpMs) ? subExpMs : 0,
+      leaseDays: days,
+    };
+  }
+
+  verifyOfflineLease(token) {
+    if (!token || typeof token !== 'string' || !token.includes('.')) {
+      throw new UnauthorizedError('Invalid offline authorization lease.', 'INVALID_OFFLINE_LEASE');
+    }
+    const [encoded, providedSig] = token.split('.');
+    const expectedSig = crypto
+      .createHmac('sha256', this._getSigningSecret())
+      .update(encoded)
+      .digest('base64url');
+    const a = Buffer.from(providedSig, 'utf8');
+    const b = Buffer.from(expectedSig, 'utf8');
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      throw new UnauthorizedError('Offline lease signature mismatch.', 'INVALID_OFFLINE_LEASE');
+    }
+    let payload;
+    try {
+      payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    } catch {
+      throw new UnauthorizedError('Corrupted offline authorization lease.', 'INVALID_OFFLINE_LEASE');
+    }
+    if (payload.typ !== 'offline_lease' || !payload.uid || !payload.exp) {
+      throw new UnauthorizedError('Malformed offline authorization lease.', 'INVALID_OFFLINE_LEASE');
+    }
+    if (payload.exp < Math.floor(Date.now() / 1000)) {
+      throw new ForbiddenError('Offline authorization lease has expired.', 'OFFLINE_LEASE_EXPIRED');
+    }
+    return payload;
+  }
+
+  /**
+   * POST /api/v1/downloads/lease/refresh
+   * Verifies active device + active subscription and renews the student's time-limited offline lease.
+   */
+  async refreshOfflineLease({ user, session, device, rawDeviceId = null }) {
+    if (rawDeviceId) {
+      await this.deviceService.verifyDeviceActive({
+        userId: user.id,
+        rawDeviceId,
+        boundDeviceId: session?.device_id,
+      });
+    } else if (!device || !device.is_active) {
+      throw new ForbiddenError('Device is not registered or active.', 'DEVICE_NOT_REGISTERED');
+    }
+
+    const subStatus = await this.subscriptionService.assertActiveSubscription(user.id);
+    const deviceId = device?.id || session?.device_id || '';
+    const offlineLease = this.signOfflineLease({
+      studentId: user.id,
+      deviceId,
+      lessonId: '*',
+      subscriptionExpiresAt: subStatus?.expiresAt || subStatus?.expires_at || null,
+    });
+
+    return {
+      offlineLease,
+      subscriptionStatus: subStatus?.status || 'active',
+      retentionPolicy: this.config.OFFLINE_RETENTION_POLICY || 'wipe_on_logout',
+    };
+  }
+
   async _resolveChapterAndSubject(lesson) {
     const [subject, chapters] = await Promise.all([
       this.store.getSubjectById(lesson.subject_id).catch(() => null),
@@ -248,6 +353,7 @@ export class OfflineDownloadService {
     return {
       lesson: {
         id: lesson.id,
+        lessonNumber: lesson.lesson_number || lesson.display_order || 1,
         subjectId: lesson.subject_id,
         subjectTitle: meta.subjectTitle,
         chapterId: lesson.chapter_id,
@@ -255,8 +361,11 @@ export class OfflineDownloadService {
         chapterTitle: meta.chapterTitle,
         title: lesson.title,
         description: lesson.description || '',
+        teacherName: lesson.teacher_name || '',
+        learningObjectives: lesson.learning_objectives || '',
         thumbnailUrl: lesson.thumbnail_url || null,
         durationSeconds: Number(lesson.duration_seconds || asset?.duration_seconds || 0),
+        hasVideo: Boolean(source || asset),
         isPremium: Boolean(lesson.is_premium),
         locked,
       },
@@ -519,10 +628,21 @@ export class OfflineDownloadService {
       assetId: asset.id,
     });
 
-    const [meta, sec] = await Promise.all([
+    const [meta, sec, subStatus] = await Promise.all([
       this._resolveChapterAndSubject(lesson),
       this._getVideoSecurityAndWatermark(user),
+      this.subscriptionService.getStatus(user.id),
     ]);
+
+    const offlineLease = this.signOfflineLease({
+      studentId: user.id,
+      deviceId: deviceId || '',
+      lessonId: lesson.id,
+      subscriptionExpiresAt: lesson.is_premium
+        ? subStatus?.expiresAt || subStatus?.expires_at || null
+        : null,
+      leaseDays: lesson.is_premium ? undefined : 30,
+    });
 
     const base = (this.config.PUBLIC_API_BASE_URL || apiBaseUrl || '').replace(/\/+$/, '');
     const streamPath = `/api/v1/downloads/${record.id}/stream?token=${encodeURIComponent(token)}`;
@@ -538,6 +658,7 @@ export class OfflineDownloadService {
       fileSize: Number(asset.file_size_bytes),
       sha256Checksum: asset.sha256_checksum,
       expiresAt,
+      offlineLease,
       lesson: {
         id: lesson.id,
         title: lesson.title,
@@ -577,7 +698,7 @@ export class OfflineDownloadService {
     }
 
     if (record.download_status === 'queued') {
-      await this.store.updateStudentDownload(downloadId, { download_status: 'downloading' }).catch(() => {});
+      await this.store.updateStudentDownload(downloadId, { download_status: 'downloading' }).catch(() => { });
     }
 
     await this.storageService.streamAssetToResponse({
@@ -804,8 +925,8 @@ export class OfflineDownloadService {
   }
 
   /**
-   * Registers an already-stored authorized private MP4 (Cloudflare R2 / Supabase Storage / PikPak)
-   * without duplicating files.
+   * Registers an already-stored authorized server MP4 (persistent_disk / pikpak_local)
+   * without duplicating files. Third-party cloud object storage is disabled.
    */
   async registerExternalOfflineAsset({
     admin,

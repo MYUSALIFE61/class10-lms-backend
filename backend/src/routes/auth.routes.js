@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
+import { formatStudentProfileDto } from '../services/authService.js';
+import { buildSubscriptionSummary } from '../services/paymentService.js';
+
+const USERNAME_REGEX = /^[a-zA-Z0-9._-]{4,32}$/;
+const STRONG_PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,128}$/;
 
 const deviceSchema = z.object({
   deviceId: z.string().min(8, 'deviceId must be at least 8 characters').max(128),
@@ -11,20 +16,55 @@ const deviceSchema = z.object({
   platform: z.enum(['android', 'web']).default('android'),
 });
 
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(128),
-  fullName: z.string().min(2).max(100),
-  phone: z
-    .string()
-    .regex(/^[0-9+\-\s]{10,15}$/, 'Valid phone number required')
-    .optional(),
-  board: z.enum(['AP', 'TS']).default('AP'),
-  device: deviceSchema,
+const registerSchema = z
+  .object({
+    email: z.string().trim().email('Valid email address required'),
+    password: z
+      .string()
+      .min(8, 'Password must be at least 8 characters')
+      .max(128)
+      .regex(
+        STRONG_PASSWORD_REGEX,
+        'Password must contain at least 1 uppercase letter, 1 lowercase letter, and 1 number'
+      ),
+    confirmPassword: z.string().optional(),
+    fullName: z.string().trim().min(2, 'Full Name must be at least 2 characters').max(100),
+    username: z
+      .string()
+      .trim()
+      .regex(
+        USERNAME_REGEX,
+        'Username must be 4-32 characters (letters, numbers, dot, underscore, hyphen)'
+      )
+      .optional(),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^[0-9+\-\s]{10,15}$/, 'Valid mobile number required')
+      .optional(),
+    state: z.string().trim().min(2).max(80).optional(),
+    district: z.string().trim().max(80).optional().default(''),
+    schoolName: z.string().trim().max(150).optional().default(''),
+    className: z.string().trim().min(2).max(40).optional().default('Class 10'),
+    board: z.enum(['AP', 'TS']).default('AP'),
+    device: deviceSchema,
+  })
+  .superRefine((data, ctx) => {
+    if (data.confirmPassword !== undefined && data.confirmPassword !== data.password) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmPassword'],
+        message: 'Confirm password does not match password',
+      });
+    }
+  });
+
+const checkUsernameQuerySchema = z.object({
+  username: z.string().trim().min(1, 'Username is required').max(64),
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().min(3, 'Email or username is required').max(150),
   password: z.string().min(1, 'Password is required'),
   device: deviceSchema,
 });
@@ -35,12 +75,17 @@ const refreshSchema = z.object({
 });
 
 const updateProfileSchema = z.object({
-  fullName: z.string().min(2).max(100).optional(),
+  fullName: z.string().trim().min(2).max(100).optional(),
   phone: z
     .string()
+    .trim()
     .regex(/^[0-9+\-\s]{10,15}$/, 'Valid phone number required')
     .optional(),
   board: z.enum(['AP', 'TS']).optional(),
+  state: z.string().trim().min(2).max(80).optional(),
+  district: z.string().trim().max(80).optional(),
+  schoolName: z.string().trim().max(150).optional(),
+  className: z.string().trim().min(2).max(40).optional(),
 });
 
 const logoutSchema = z.object({
@@ -49,6 +94,45 @@ const logoutSchema = z.object({
 
 export function createAuthRoutes({ authService, store, requireAuth, authLimiter }) {
   const router = Router();
+
+  router.get(
+    '/check-username',
+    authLimiter,
+    validate({ query: checkUsernameQuerySchema }),
+    async (req, res, next) => {
+      try {
+        const normalizedUsername = req.query.username.trim().toLowerCase();
+        if (!USERNAME_REGEX.test(normalizedUsername)) {
+          return res.json({
+            success: true,
+            data: {
+              available: false,
+              valid: false,
+              normalizedUsername,
+              message:
+                'Username must be 4-32 characters (letters, numbers, dot, underscore, hyphen).',
+            },
+          });
+        }
+
+        const existing = store.getProfileByUsername
+          ? await store.getProfileByUsername(normalizedUsername)
+          : null;
+
+        res.json({
+          success: true,
+          data: {
+            available: !existing,
+            valid: true,
+            normalizedUsername,
+            message: existing ? 'Username is already taken.' : 'Username is available.',
+          },
+        });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 
   router.post(
     '/register',
@@ -125,34 +209,14 @@ export function createAuthRoutes({ authService, store, requireAuth, authLimiter 
   router.get('/me', requireAuth, async (req, res, next) => {
     try {
       const sub = await store.getLatestSubscription(req.user.id);
-      const isActive =
-        Boolean(sub) &&
-        sub.status === 'active' &&
-        new Date(sub.expires_at).getTime() > Date.now();
       res.json({
         success: true,
         data: {
-          user: {
-            id: req.user.id,
-            fullName: req.user.full_name,
-            email: req.user.email,
-            phone: req.user.phone,
-            board: req.user.board,
-            studentCode: req.user.student_code,
-            role: req.user.role,
-          },
+          user: formatStudentProfileDto(req.user),
           device: req.device
             ? { id: req.device.id, deviceName: req.device.device_name }
             : null,
-          subscription: sub
-            ? {
-                id: sub.id,
-                status: isActive ? 'active' : sub.status === 'active' ? 'expired' : sub.status,
-                isActive,
-                startsAt: sub.starts_at,
-                expiresAt: sub.expires_at,
-              }
-            : { status: 'none', isActive: false, startsAt: null, expiresAt: null },
+          subscription: buildSubscriptionSummary(sub),
         },
       });
     } catch (err) {
@@ -170,19 +234,15 @@ export function createAuthRoutes({ authService, store, requireAuth, authLimiter 
         if (req.body.fullName !== undefined) patch.full_name = req.body.fullName.trim();
         if (req.body.phone !== undefined) patch.phone = req.body.phone;
         if (req.body.board !== undefined) patch.board = req.body.board;
+        if (req.body.state !== undefined) patch.state = req.body.state.trim();
+        if (req.body.district !== undefined) patch.district = req.body.district.trim();
+        if (req.body.schoolName !== undefined) patch.school = req.body.schoolName.trim();
+        if (req.body.className !== undefined) patch.class_name = req.body.className.trim();
         const updated = await store.updateProfile(req.user.id, patch);
         res.json({
           success: true,
           data: {
-            user: {
-              id: updated.id,
-              fullName: updated.full_name,
-              email: updated.email,
-              phone: updated.phone,
-              board: updated.board,
-              studentCode: updated.student_code,
-              role: updated.role,
-            },
+            user: formatStudentProfileDto(updated),
           },
         });
       } catch (err) {

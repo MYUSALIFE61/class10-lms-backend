@@ -160,7 +160,7 @@ export function SubjectDetailPage() {
             {chapters.length === 0 ? (
               <EmptyState
                 title="No Chapters Published Yet"
-                description="Upload videos into Class_10 folders or add chapters to see them here."
+                description="Published Class 10 SSC chapters for this subject will appear here."
               />
             ) : (
               chapters.map((ch, idx) => (
@@ -174,26 +174,53 @@ export function SubjectDetailPage() {
                     })
                   }
                 >
-                  <div
-                    className="course-icon-box"
-                    style={{
-                      width: 58,
-                      height: 58,
-                      background: CHAPTER_CARD_GRADIENTS[idx % CHAPTER_CARD_GRADIENTS.length],
-                      fontSize: '1.1rem',
-                      fontWeight: 800,
-                    }}
-                  >
-                    Ch {ch.chapterNumber || idx + 1}
-                  </div>
+                  {ch.thumbnailUrl ? (
+                    <img
+                      src={ch.thumbnailUrl}
+                      alt={ch.title}
+                      style={{ width: 62, height: 62, borderRadius: 14, objectFit: 'cover', flexShrink: 0 }}
+                    />
+                  ) : (
+                    <div
+                      className="course-icon-box"
+                      style={{
+                        width: 58,
+                        height: 58,
+                        background: CHAPTER_CARD_GRADIENTS[idx % CHAPTER_CARD_GRADIENTS.length],
+                        fontSize: '1.05rem',
+                        fontWeight: 800,
+                      }}
+                    >
+                      Ch {ch.chapterNumber || idx + 1}
+                    </div>
+                  )}
 
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text)' }}>
-                      {ch.chapterNumber > 0 ? `${ch.chapterNumber}. ` : ''}
-                      {ch.title}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text)' }}>
+                        {ch.chapterNumber > 0 ? `${ch.chapterNumber}. ` : ''}
+                        {ch.title}
+                      </span>
+                      {ch.locked && (
+                        <span className="badge badge-amber" style={{ fontSize: '0.66rem' }}>
+                          <Lock size={11} /> Locked
+                        </span>
+                      )}
                     </div>
-                    <div style={{ fontSize: '0.77rem', color: 'var(--text-muted)', marginTop: 3, fontWeight: 600 }}>
-                      {ch.videoCount ?? 0} Videos &bull; {ch.testCount ?? 1} Tests
+                    {ch.summary && (
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                        {ch.summary}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 4, fontWeight: 600 }}>
+                      {ch.completedLessons ?? 0}/{ch.totalLessons ?? ch.videoCount ?? 0} Lessons Completed &bull;{' '}
+                      {ch.progressPercent ?? 0}%
+                    </div>
+                    <div className="progress-bar-track" style={{ height: 6, marginTop: 5 }}>
+                      <div
+                        className="progress-bar-fill"
+                        style={{ width: `${ch.progressPercent ?? 0}%`, background: '#1152d4' }}
+                      />
                     </div>
                   </div>
                   <ChevronRight size={19} color="#64748b" />
@@ -209,7 +236,7 @@ export function SubjectDetailPage() {
             {allVideos.length === 0 ? (
               <EmptyState
                 title="No Videos in This Subject Yet"
-                description="Upload MP4 videos to Class_10/<Subject>/Ch01_... and tap Sync Videos on Home."
+                description="Videos for this subject will appear here as soon as they are published."
               />
             ) : (
               allVideos.map((lesson) => (

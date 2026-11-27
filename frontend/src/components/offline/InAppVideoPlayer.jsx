@@ -193,7 +193,7 @@ export function InAppVideoPlayer({
     const v = videoRef.current;
     if (!v) return;
     if (v.paused) {
-      v.play?.().catch?.(() => {});
+      v.play?.().catch?.(() => { });
       setIsPlaying(true);
     } else {
       v.pause?.();

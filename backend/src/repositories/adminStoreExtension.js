@@ -7,7 +7,16 @@ import { AppError } from '../utils/errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-export const UPLOADS_DIR = path.resolve(__dirname, '../../uploads/resources');
+export const DEFAULT_RESOURCES_UPLOAD_DIR = path.resolve(__dirname, '../../uploads/resources');
+export const UPLOADS_DIR = DEFAULT_RESOURCES_UPLOAD_DIR;
+
+export function resolveResourcesUploadDir(overrideDir = '') {
+  const explicit = String(overrideDir || '').trim();
+  if (explicit) return path.resolve(explicit);
+  const fromEnv = String(process.env.RESOURCES_UPLOAD_DIR || '').trim();
+  if (fromEnv) return path.resolve(fromEnv);
+  return DEFAULT_RESOURCES_UPLOAD_DIR;
+}
 
 export const DEFAULT_VIDEO_SECURITY = {
   protectedPlaybackEnabled: true,
@@ -90,11 +99,13 @@ function isPublishedRecord(record) {
   return false;
 }
 
-export function saveUploadedFile({ fileName, mimeType, contentBase64 }) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  const safeBase = String(fileName || 'resource.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+export function saveUploadedFile({ fileName, mimeType, contentBase64, uploadDir = '' }) {
+  const targetDir = resolveResourcesUploadDir(uploadDir);
+  fs.mkdirSync(targetDir, { recursive: true });
+  const rawBase = path.basename(String(fileName || 'resource.pdf'));
+  const safeBase = rawBase.replace(/[^a-zA-Z0-9._-]/g, '_') || 'resource.pdf';
   const storedName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}_${safeBase}`;
-  const fullPath = path.join(UPLOADS_DIR, storedName);
+  const fullPath = path.join(targetDir, storedName);
   const buffer = Buffer.from(contentBase64, 'base64');
   fs.writeFileSync(fullPath, buffer);
   return {
@@ -104,11 +115,25 @@ export function saveUploadedFile({ fileName, mimeType, contentBase64 }) {
   };
 }
 
-export function resolveUploadedFilePath(storagePath) {
-  if (!storagePath || storagePath.includes('..') || path.isAbsolute(storagePath)) return null;
-  const full = path.join(UPLOADS_DIR, storagePath);
-  if (!fs.existsSync(full)) return null;
-  return full;
+export function resolveUploadedFilePath(storagePath, { uploadDir = '' } = {}) {
+  if (!storagePath || typeof storagePath !== 'string') return null;
+  if (
+    storagePath.includes('\0') ||
+    storagePath.includes('..') ||
+    storagePath.includes('/') ||
+    storagePath.includes('\\') ||
+    path.isAbsolute(storagePath)
+  ) {
+    return null;
+  }
+  const targetDir = resolveResourcesUploadDir(uploadDir);
+  const resolvedBase = path.resolve(targetDir);
+  const resolved = path.resolve(resolvedBase, storagePath);
+  if (!resolved.startsWith(`${resolvedBase}${path.sep}`)) {
+    return null;
+  }
+  if (!fs.existsSync(resolved)) return null;
+  return resolved;
 }
 
 function throwIfSbError(error, ctx) {

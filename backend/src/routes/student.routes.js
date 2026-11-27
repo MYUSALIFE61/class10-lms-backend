@@ -69,6 +69,53 @@ export function createStudentRoutes({
     }
   });
 
+  router.get('/lessons/:lessonId/notes', requireAuth, async (req, res, next) => {
+    try {
+      const data = await studentDynamicService.getLessonNotesForStudent(req.user, req.params.lessonId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/lessons/:lessonId/concepts', requireAuth, async (req, res, next) => {
+    try {
+      const data = await studentDynamicService.getLessonConceptsForStudent(req.user, req.params.lessonId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/lessons/:lessonId/revision', requireAuth, async (req, res, next) => {
+    try {
+      const data = await studentDynamicService.getLessonRevisionForStudent(req.user, req.params.lessonId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/lessons/:lessonId/pyqs', requireAuth, async (req, res, next) => {
+    try {
+      const data = await studentDynamicService.getLessonPyqsForStudent(req.user, req.params.lessonId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/recent-lessons', requireAuth, async (req, res, next) => {
+    try {
+      const items = await studentDynamicService.getRecentLessonsForStudent(req.user, {
+        limit: Math.min(Math.max(Number(req.query.limit || 8), 1), 25),
+      });
+      res.json({ success: true, data: { items } });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/resources', requireAuth, async (req, res, next) => {
     try {
       const items = await studentDynamicService.getResourcesForStudent(req.user, {
@@ -89,7 +136,8 @@ export function createStudentRoutes({
       const diskPath = adminCmsService.getResourceDiskPath(resource);
       if (!diskPath) throw new NotFoundError('Resource file not found on server');
       res.type(resource.mime_type || 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${resource.file_name || 'resource.pdf'}"`);
+      const safeDispositionName = String(resource.file_name || 'resource.pdf').replace(/["\r\n\\]/g, '_');
+      res.setHeader('Content-Disposition', `inline; filename="${safeDispositionName}"`);
       res.sendFile(diskPath);
     } catch (err) {
       next(err);

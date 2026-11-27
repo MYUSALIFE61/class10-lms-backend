@@ -1,13 +1,14 @@
 import React from 'react';
-import { Download, Play, RotateCcw, X, Loader2 } from 'lucide-react';
+import { Download, Play, RotateCcw, X, Loader2, Pause } from 'lucide-react';
 import { DOWNLOAD_STATES } from '../../services/offlineDownloadService.js';
 
 /**
  * VideoDownloadButton
  *
- * Strictly enforces the 5-state offline download button contract:
+ * Strictly enforces the offline download button state contract:
  * - NOT_DOWNLOADED  -> "Download Video" (NEVER displays "Watch Now")
- * - DOWNLOADING     -> Progress percentage + "Cancel"
+ * - DOWNLOADING     -> Progress percentage + optional "Pause" + "Cancel"
+ * - PAUSED          -> "Resume" + "Cancel"
  * - DOWNLOADED      -> "Watch Now" (ONLY after verified file existence + SHA-256 integrity)
  * - DOWNLOAD_FAILED -> "Retry Download"
  * - FILE_MISSING    -> "Download Video"
@@ -18,6 +19,8 @@ export function VideoDownloadButton({
   fileSizeLabel = '',
   disabled = false,
   onDownload,
+  onPause,
+  onResume,
   onCancel,
   onWatchNow,
   onRetry,
@@ -53,6 +56,49 @@ export function VideoDownloadButton({
         >
           <Loader2 size={18} className="spin-icon" />
           <span>Downloading {Math.min(100, Math.max(0, Math.round(percent)))}%</span>
+        </button>
+        {onPause && (
+          <button
+            type="button"
+            data-testid="btn-pause-download"
+            className="btn btn-outline"
+            style={{ minHeight: 48, padding: '0 14px', fontSize: '0.86rem' }}
+            onClick={onPause}
+          >
+            <Pause size={16} />
+            <span>Pause</span>
+          </button>
+        )}
+        <button
+          type="button"
+          data-testid="btn-cancel-download"
+          className="btn btn-soft-danger"
+          style={{ minHeight: 48, padding: '0 16px', fontSize: '0.88rem' }}
+          onClick={onCancel}
+        >
+          <X size={17} />
+          <span>Cancel</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (status === DOWNLOAD_STATES.PAUSED) {
+    return (
+      <div
+        data-testid="btn-paused-group"
+        style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+      >
+        <button
+          type="button"
+          data-testid="btn-resume-download"
+          className="btn btn-primary"
+          style={{ flex: 1, minHeight: 48, fontSize: '0.94rem', fontWeight: 800 }}
+          disabled={disabled}
+          onClick={onResume || onDownload}
+        >
+          <Play size={17} fill="#ffffff" />
+          <span>Resume ({Math.min(99, Math.max(0, Math.round(percent)))}%)</span>
         </button>
         <button
           type="button"
